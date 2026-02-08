@@ -28,3 +28,7 @@ curl -fsSL https://raw.githubusercontent.com/basecamp/omaterm/master/install.sh 
 During installation you'll be asked for:
 - Git user name
 - Git email address
+
+And you'll have to login into:
+- Tailscale
+- GitHub
