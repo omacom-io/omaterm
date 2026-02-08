@@ -230,9 +230,11 @@ sudo systemctl enable --now sshd.service
 sudo systemctl enable --now tailscaled.service
 
 # Add user to docker group
+DOCKER_GROUP_ADDED=false
 if ! groups | grep -q docker; then
   sudo usermod -aG docker "$USER"
-  echo "    Added $USER to docker group (re-login to take effect)"
+  echo "Added $USER to docker group"
+  DOCKER_GROUP_ADDED=true
 fi
 
 # ─────────────────────────────────────────────
@@ -253,3 +255,8 @@ fi
 # ─────────────────────────────────────────────
 echo
 echo "Setup complete!"
+
+if [ "$DOCKER_GROUP_ADDED" = true ]; then
+  echo
+  gum confirm "Docker setup requires logout. Log out now?" </dev/tty && exit
+fi
