@@ -1,6 +1,10 @@
 add_newline = true
 command_timeout = 200
-format = "[$directory$git_branch$git_status]($style)$character"
+format = "[$hostname$directory$git_branch$git_status]($style)$character"
+
+[hostname]
+format = "[$hostname]($style) "
+style = "bold dimmed white"
 
 [character]
 error_symbol = "[>](bold red)"
