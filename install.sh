@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+echo
 echo -e " ▄██████▄    ▄▄▄▄███▄▄▄▄      ▄████████     ███        ▄████████    ▄████████   ▄▄▄▄███▄▄▄▄  
 ███    ███ ▄██▀▀▀███▀▀▀██▄   ███    ███ ▀█████████▄   ███    ███   ███    ███ ▄██▀▀▀███▀▀▀██▄
 ███    ███ ███   ███   ███   ███    ███    ▀███▀▀██   ███    █▀    ███    ███ ███   ███   ███
@@ -72,8 +73,9 @@ fi
 echo "==> Configuring git..."
 
 # Get user info via gum
-GIT_NAME=$(gum input --placeholder "Your full name" --prompt "Git config: ")
-GIT_EMAIL=$(gum input --placeholder "your@email.com" --prompt "Git config: ")
+echo ""
+GIT_NAME=$(gum input --placeholder "Your full name" --prompt "Git user name: ")
+GIT_EMAIL=$(gum input --placeholder "your@email.com" --prompt "Git email: ")
 
 cat >"$HOME/.gitconfig" <<GITCONFIG
 [user]
