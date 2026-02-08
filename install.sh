@@ -247,6 +247,7 @@ fi
 
 echo
 if gum confirm "Connect to Tailscale network?" </dev/tty; then
+  echo "This might take a minute..."
   sudo tailscale up --ssh --accept-routes
 fi
 
