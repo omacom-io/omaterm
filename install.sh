@@ -56,7 +56,7 @@ yay -S --needed --noconfirm "${AUR_PKGS[@]}"
 # ─────────────────────────────────────────────
 # Git config
 # ─────────────────────────────────────────────
-if [ ! -f "$HOME/.gitconfig" ]; then
+if [[ ! -f $HOME/.gitconfig ]]; then
   echo
   echo "==> Configuring git..."
   echo
@@ -112,9 +112,9 @@ alias ff="fzf --preview 'bat --style=numbers --color=always {}'"
 
 alias cd="zd"
 zd() {
-  if [ $# -eq 0 ]; then
+  if [[ $# -eq 0 ]]; then
     builtin cd ~ && return
-  elif [ -d "$1" ]; then
+  elif [[ -d $1 ]]; then
     builtin cd "$1"
   else
     z "$@" && printf "-> " && pwd || echo "Error: Directory not found"
@@ -131,7 +131,7 @@ alias c='opencode'
 alias cx='claude --permission-mode=plan --allow-dangerously-skip-permissions'
 alias d='docker'
 alias r='rails'
-n() { if [ "$#" -eq 0 ]; then nvim .; else nvim "$@"; fi; }
+n() { if [[ $# -eq 0 ]]; then nvim .; else nvim "$@"; fi; }
 
 # Git
 alias g='git'
@@ -196,7 +196,7 @@ experimental = true
 idiomatic_version_file_enable_tools = ["ruby"]
 MISE
 
-if [ ! -d "$HOME/.config/nvim" ]; then
+if [[ ! -d $HOME/.config/nvim ]]; then
   echo
   echo "==> Setup LazyVim..."
   git clone https://github.com/LazyVim/starter ~/.config/nvim
@@ -215,20 +215,20 @@ sudo systemctl enable --now tailscaled.service
 # SSH setup
 # ─────────────────────────────────────────────
 echo
-echo "==> Configuring SSH..."
-mkdir -p "$HOME/.ssh"
-chmod 700 "$HOME/.ssh"
-
 SSH_KEYS_ADDED=false
-if [ ! -f "$HOME/.ssh/authorized_keys" ] || [ ! -s "$HOME/.ssh/authorized_keys" ]; then
+if [[ ! -f $HOME/.ssh/authorized_keys ]] || [[ ! -s $HOME/.ssh/authorized_keys ]]; then
   if gum confirm "Add SSH public key(s) for remote access?" </dev/tty; then
+    mkdir -p "$HOME/.ssh"
+    chmod 700 "$HOME/.ssh"
+
     echo "Paste your SSH public key(s) below (one per line, blank line when done):"
     SSH_KEYS=""
     while IFS= read -r line </dev/tty; do
-      [ -z "$line" ] && break
+      [[ -z $line ]] && break
       SSH_KEYS="${SSH_KEYS}${line}\n"
     done
-    if [ -n "$SSH_KEYS" ]; then
+
+    if [[ -n $SSH_KEYS ]]; then
       printf "%s" "$SSH_KEYS" >"$HOME/.ssh/authorized_keys"
       chmod 600 "$HOME/.ssh/authorized_keys"
       echo "SSH keys added to authorized_keys"
@@ -238,7 +238,7 @@ if [ ! -f "$HOME/.ssh/authorized_keys" ] || [ ! -s "$HOME/.ssh/authorized_keys" 
 fi
 
 # Only disable password auth if we actually configured SSH keys
-if [ "$SSH_KEYS_ADDED" = true ]; then
+if [[ $SSH_KEYS_ADDED == true ]]; then
   sudo sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
   sudo sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
   sudo systemctl restart sshd.service
@@ -275,7 +275,7 @@ fi
 echo
 echo "Setup complete!"
 
-if [ "$DOCKER_GROUP_ADDED" = true ]; then
+if [[ $DOCKER_GROUP_ADDED == true ]]; then
   echo
   gum confirm "Docker setup requires logout. Log out now?" </dev/tty && exit
 fi
