@@ -277,5 +277,5 @@ echo "Setup complete!"
 
 if [[ $DOCKER_GROUP_ADDED == true ]]; then
   echo
-  gum confirm "Docker setup requires logout. Log out now?" </dev/tty && exit
+  gum confirm "Sudoless Docker requires logout. Log out now?" </dev/tty && exit
 fi
