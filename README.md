@@ -11,7 +11,7 @@ A minimal Omarchy-style single-file terminal setup for your headless Arch Linux 
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/basecamp/omaterm/master/install.sh | bash
+curl -fsSL https://omaterm.org/install | bash
 ```
 
 ## What it sets up
