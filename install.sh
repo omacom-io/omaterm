@@ -72,8 +72,17 @@ sudo tailscale up --ssh --accept-routes
 # ─────────────────────────────────────────────
 # Git config
 # ─────────────────────────────────────────────
-echo "==> Writing ~/.gitconfig..."
-cat >"$HOME/.gitconfig" <<'GITCONFIG'
+echo "==> Configuring git..."
+
+# Get user info via gum
+GIT_NAME=$(gum input --placeholder "Your full name" --prompt "Git config: ")
+GIT_EMAIL=$(gum input --placeholder "your@email.com" --prompt "Git config: ")
+
+cat >"$HOME/.gitconfig" <<GITCONFIG
+[user]
+	name = ${GIT_NAME}
+	email = ${GIT_EMAIL}
+
 [credential "https://github.com"]
 	helper =
 	helper = !/usr/bin/gh auth git-credential
@@ -108,6 +117,9 @@ cat >"$HOME/.gitconfig" <<'GITCONFIG'
 	enabled = true           # Record and reuse conflict resolutions
 	autoupdate = true        # Apply stored conflict resolutions automatically
 GITCONFIG
+
+# Authenticate with GitHub
+gh auth login
 
 # ─────────────────────────────────────────────
 # Shell config
@@ -221,7 +233,5 @@ git clone https://github.com/LazyVim/starter ~/.config/nvim
 # ─────────────────────────────────────────────
 echo ""
 echo "==> Setup complete! Manual steps remaining:"
-echo "    1. Set git config --global user.name 'Your name'"
-echo "    2. Set git config --global user.email 'Your email'"
-echo "    3. Run 'gh auth login' to authenticate GitHub CLI"
-echo "    4. Re-login for docker group membership to take effect"
+echo "    1. Run 'gh auth login' to authenticate GitHub CLI"
+echo "    2. Re-login for docker group membership to take effect"
