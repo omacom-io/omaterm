@@ -115,9 +115,6 @@ cat >"$HOME/.gitconfig" <<GITCONFIG
 	autoupdate = true
 GITCONFIG
 
-# Authenticate with GitHub
-gh auth login
-
 # ─────────────────────────────────────────────
 # Shell config
 # ─────────────────────────────────────────────
@@ -226,8 +223,12 @@ echo "==> Setup LazyVim..."
 git clone https://github.com/LazyVim/starter ~/.config/nvim
 
 # ─────────────────────────────────────────────
-# Tailscale
+# Interactive setup
 # ─────────────────────────────────────────────
+if gum confirm "Authenticate with GitHub?"; then
+  gh auth login
+fi
+
 if gum confirm "Connect to Tailscale network?"; then
   sudo tailscale up --ssh --accept-routes
 fi
