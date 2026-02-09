@@ -81,6 +81,10 @@ download config/starship.toml >"$HOME/.config/starship.toml"
 mkdir -p "$HOME/.config/mise"
 download config/mise.toml >"$HOME/.config/mise/config.toml"
 
+# Tmux
+mkdir -p "$HOME/.config/tmux"
+download config/tmux.conf >"$HOME/.config/tmux/tmux.conf"
+
 # LazyVim (https://www.lazyvim.org/)
 if [[ ! -d $HOME/.config/nvim ]]; then
   git clone https://github.com/LazyVim/starter ~/.config/nvim
