@@ -167,4 +167,5 @@ fi
 # ─────────────────────────────────────────────
 # Post-install steps
 # ─────────────────────────────────────────────
-section "✓ Setup complete!"
+echo
+echo "✓ Setup complete!"
