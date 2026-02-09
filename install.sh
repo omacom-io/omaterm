@@ -95,6 +95,7 @@ fi
 # ─────────────────────────────────────────────
 section "Adding commands..."
 mkdir -p .local/bin
+download bin/omaterm-reinstall >"$HOME/.local/bin/omaterm-reinstall"
 download bin/omaterm-ssh-key >"$HOME/.local/bin/omaterm-ssh-key"
 download bin/omaterm-ts-chromium >"$HOME/.local/bin/omaterm-ts-chromium"
 chmod +x $HOME/.local/bin/*
