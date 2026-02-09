@@ -50,3 +50,8 @@ alias gcad='git commit -a --amend'
 eval "$(mise activate bash)" # https://mise.jdx.dev/
 eval "$(starship init bash)" # https://starship.rs/
 eval "$(zoxide init bash)"   # https://github.com/ajeetdsouza/zoxide
+
+# Start tmux
+if [[ -z $TMUX ]]; then
+  tmux attach || tmux new -s Work
+fi
