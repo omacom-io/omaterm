@@ -101,11 +101,9 @@ download config/nvim-colorscheme.lua >"$HOME/.config/nvim/lua/plugins/colorschem
 download config/nvim-options.lua >"$HOME/.config/nvim/lua/config/options.lua"
 echo "✓ Nvim"
 
-# Btop ANSI theme
-mkdir -p "$HOME/.config/btop/themes"
+# Btop (uses built-in TTY theme for ANSI colors)
+mkdir -p "$HOME/.config/btop"
 download config/btop.conf >"$HOME/.config/btop/btop.conf"
-download config/btop-ansi.theme >"$HOME/.config/btop/themes/ansi.theme"
-ln -sf "$HOME/.config/btop/themes/ansi.theme" "$HOME/.config/btop/themes/current.theme"
 echo "✓ Btop"
 
 # ─────────────────────────────────────────────
