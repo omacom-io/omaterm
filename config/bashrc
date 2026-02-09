@@ -36,6 +36,7 @@ alias cx='claude --permission-mode=plan --allow-dangerously-skip-permissions'
 alias d='docker'
 alias r='rails'
 alias v='vim'
+alias t='tmux attach || tmux new'
 n() { if [[ $# -eq 0 ]]; then nvim .; else nvim "$@"; fi; }
 
 # Git
