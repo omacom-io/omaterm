@@ -97,7 +97,7 @@ fi
 
 # Neovim theme (change ~/.config/omaterm/nvim.theme to switch colorschemes)
 mkdir -p "$HOME/.config/omaterm"
-[[ -f "$HOME/.config/omaterm/nvim.theme" ]] || echo "default" >"$HOME/.config/omaterm/nvim.theme"
+[[ -f "$HOME/.config/omaterm/nvim.theme" ]] || echo "tokyonight" >"$HOME/.config/omaterm/nvim.theme"
 mkdir -p "$HOME/.config/nvim/lua/plugins"
 download config/nvim-colorscheme.lua >"$HOME/.config/nvim/lua/plugins/colorscheme.lua"
 echo "✓ Nvim"
