@@ -59,6 +59,7 @@ source ~/.config/shell/all
 [[ -z $TMUX ]] && t
 EOF
 echo '[[ -f ~/.bashrc ]] && . ~/.bashrc' >"$HOME/.bash_profile"
+echo "✓ .bashrc"
 
 # ─────────────────────────────────────────────
 # Omaterm configs and bins
