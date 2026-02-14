@@ -46,7 +46,7 @@ section "Installing AUR packages..."
 yay -S --needed --noconfirm "${AUR_PKGS[@]}"
 
 # Omadots
-curl -fsSL https://install.omacom.io/dots | bash
+curl -fsSL https://raw.githubusercontent.com/omacom-io/omadots/refs/heads/master/install.sh | zsh
 
 # Configs and bins
 REPO="https://github.com/omacom-io/omaterm.git"
