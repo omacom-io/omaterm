@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO="https://github.com/omacom-io/omaterm.git"
+INSTALLER_DIR="$(mktemp -d)"
+trap 'rm -rf "$INSTALLER_DIR"' EXIT
+
+git clone --depth 1 "$REPO" "$INSTALLER_DIR"
 
 # Common functions for Omaterm installation
 show_banner() {
@@ -27,11 +31,9 @@ install_omadots() {
 }
 
 install_configs() {
-  local installer_dir="$1"
-
   section "Installing configs..."
   mkdir -p "$HOME/.config"
-  cp -Rf "$installer_dir/config/"* "$HOME/.config/"
+  cp -Rf "$INSTALLER_DIR/config/"* "$HOME/.config/"
   echo "✓ Neovim"
   echo "✓ Starship"
 
@@ -46,11 +48,9 @@ EOF
 }
 
 install_bins() {
-  local installer_dir="$1"
-
   section "Installing bins..."
   mkdir -p "$HOME/.local/bin"
-  cp -Rf "$installer_dir/bin/"* "$HOME/.local/bin/"
+  cp -Rf "$INSTALLER_DIR/bin/"* "$HOME/.local/bin/"
   chmod +x "$HOME/.local/bin/"*
   echo "✓ omaterm-ssh"
   echo "✓ omaterm-theme"
@@ -110,15 +110,8 @@ run_installation() {
   install_omadots
 
   # Configs and bins
-  local repo="https://github.com/omacom-io/omaterm.git"
-  local installer_dir="$(mktemp -d)"
-  trap 'rm -rf "$installer_dir"' EXIT
-
-  section "Cloning Omaterm..."
-  git clone --depth 1 "$repo" "$installer_dir"
-
-  install_configs "$installer_dir"
-  install_bins "$installer_dir"
+  install_configs
+  install_bins
 
   # Mise tooling
   install_mise_tools
@@ -141,12 +134,14 @@ run_installation() {
 
 # OS detection and dispatch
 if [ -f /etc/arch-release ]; then
-  source "$SCRIPT_DIR/install-arch.sh"
+  source "$INSTALLER_DIR/install-arch.sh"
 elif [ -f /etc/debian_version ]; then
-  source "$SCRIPT_DIR/install-debian.sh"
+  source "$INSTALLER_DIR/install-debian.sh"
+elif [ -f /etc/fedora-release ]; then
+  source "$INSTALLER_DIR/install-fedora.sh"
 else
   echo "Error: Unsupported operating system"
-  echo "Omaterm supports Arch Linux and Debian/Ubuntu"
+  echo "Omaterm supports Arch Linux, Debian/Ubuntu, and Fedora"
   exit 1
 fi
 
