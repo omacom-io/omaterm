@@ -63,7 +63,7 @@ install_packages() {
   # mise (not in Ubuntu repos)
   if ! command -v mise &>/dev/null; then
     section "Installing mise..."
-    curl -fsSL https://mise.run | sh
+    curl -fsSL https://mise.run | sh 2>/dev/null
     export PATH="$HOME/.local/bin:$PATH"
   fi
 }
