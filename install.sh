@@ -1,12 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="https://github.com/omacom-io/omaterm.git"
-INSTALLER_DIR="$(mktemp -d)"
-trap 'rm -rf "$INSTALLER_DIR"' EXIT
-
-git clone --depth 1 "$REPO" "$INSTALLER_DIR"
-
 # Common functions for Omaterm installation
 show_banner() {
   clear
@@ -131,6 +125,23 @@ run_installation() {
   # Done!
   finish
 }
+
+# Ensure correct git is installed
+if ! command -v git &>/dev/null; then
+  if [ -f /etc/arch-release ]; then
+    sudo pacman -Sy --noconfirm git
+  elif [ -f /etc/debian_version ]; then
+    sudo apt-get update && sudo apt-get install -y git
+  elif [ -f /etc/fedora-release ]; then
+    sudo dnf install -y git
+  fi
+fi
+
+REPO="https://github.com/omacom-io/omaterm.git"
+INSTALLER_DIR="$(mktemp -d)"
+trap 'rm -rf "$INSTALLER_DIR"' EXIT
+
+git clone --depth 1 "$REPO" "$INSTALLER_DIR"
 
 # OS detection and dispatch
 if [ -f /etc/arch-release ]; then
