@@ -5,11 +5,23 @@ install_packages() {
   section "Installing Fedora packages..."
   sudo dnf install -y @development-tools \
     git openssh-server sudo less net-tools whois \
-    starship fzf eza zoxide tmux btop jq man-db tldr \
+    fzf zoxide tmux btop jq man-db tldr \
     vim neovim luarocks \
-    clang llvm rust libyaml \
+    clang llvm rust cargo libyaml \
     curl wget \
     gh tailscale
+
+  # starship (not in Fedora repos)
+  if ! command -v starship &>/dev/null; then
+    section "Installing starship..."
+    curl -sS https://starship.rs/install.sh | sh -s -- --yes
+  fi
+
+  # eza (not in Fedora repos)
+  if ! command -v eza &>/dev/null; then
+    section "Installing eza..."
+    cargo install eza
+  fi
 
   # Docker (not in Fedora repos, needs Docker's official repo)
   if ! command -v docker &>/dev/null; then
