@@ -3,7 +3,7 @@ install_packages() {
   sudo apt-get update
   sudo apt-get upgrade -y
 
-  section "Installing Ubuntu packages..."
+  section "Installing Debian packages..."
   sudo apt-get install -y \
     build-essential git openssh-server sudo less net-tools whois \
     fzf eza zoxide tmux btop jq man-db tldr \
