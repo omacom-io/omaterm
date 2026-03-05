@@ -10,7 +10,8 @@ install_packages() {
     vim neovim luarocks \
     clang llvm rustc libyaml-0-2 \
     curl wget gpg \
-    docker.io docker-buildx docker-compose
+    docker.io docker-buildx docker-compose \
+    kitty-terminfo
 
   # tldr: Debian Trixie+ replaced tldr with tealdeer
   if apt-cache show tealdeer &>/dev/null; then
