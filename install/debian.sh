@@ -6,11 +6,18 @@ install_packages() {
   section "Installing Debian packages..."
   sudo apt-get install -y \
     build-essential git openssh-server libssl-dev sudo less net-tools whois \
-    fzf eza zoxide tmux btop jq man-db tldr \
+    fzf eza zoxide tmux btop jq man-db \
     vim neovim luarocks \
     clang llvm rustc libyaml-0-2 \
     curl wget gpg \
     docker.io docker-buildx docker-compose
+
+  # tldr: Debian Trixie+ replaced tldr with tealdeer
+  if apt-cache show tealdeer &>/dev/null; then
+    sudo apt-get install -y tealdeer
+  else
+    sudo apt-get install -y tldr
+  fi
 
   # github-cli (not in Debian/Ubuntu repos)
   if ! command -v gh &>/dev/null; then
