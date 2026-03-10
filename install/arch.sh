@@ -36,7 +36,8 @@ install_npm_tools() {
 enable_services() {
   section "Enabling services..."
 
-  sudo systemctl enable --now docker.service
+  sudo systemctl enable docker.service
+  sudo systemctl start --no-block docker.service
   echo "✓ Docker"
 
   sudo systemctl enable --now sshd.service
