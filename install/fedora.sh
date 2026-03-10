@@ -9,7 +9,8 @@ install_packages() {
     vim neovim luarocks \
     clang llvm rust cargo libyaml \
     curl wget \
-    gh tailscale
+    gh tailscale \
+    kitty-terminfo
 
   # starship (not in Fedora repos)
   if ! command -v starship &>/dev/null; then

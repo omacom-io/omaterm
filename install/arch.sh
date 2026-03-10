@@ -7,6 +7,7 @@ install_packages() {
     github-cli lazygit lazydocker opencode
     docker docker-buildx docker-compose
     tailscale
+    kitty-terminfo
   )
 
   local aur_pkgs=(
