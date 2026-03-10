@@ -87,6 +87,17 @@ interactive_setup() {
       sudo tailscale up --ssh --accept-routes
     fi
   fi
+
+  if grep -qi proxmox /sys/class/dmi/id/product_name 2>/dev/null && [ -e /dev/ttyS0 ]; then
+    if ! systemctl is-enabled serial-getty@ttyS0.service &>/dev/null; then
+      echo
+      if gum confirm "Proxmox VM detected with serial port. Enable serial console?" </dev/tty; then
+        sudo systemctl enable serial-getty@ttyS0.service
+        sudo systemctl start serial-getty@ttyS0.service
+        echo "✓ Serial console enabled on ttyS0"
+      fi
+    fi
+  fi
 }
 
 finish() {
