@@ -110,7 +110,21 @@ finish() {
   echo "Now logout and back in for everything to take effect"
 }
 
+configure_parallel_builds() {
+  section "Configuring parallel compilation..."
+  export MAKEFLAGS="-j$(nproc)"
+
+  if [ -f /etc/makepkg.conf ]; then
+    sudo sed -i "s/^#\?MAKEFLAGS=.*/MAKEFLAGS=\"-j$(nproc)\"/" /etc/makepkg.conf
+  fi
+
+  echo "✓ Using $(nproc) cores for compilation"
+}
+
 run_installation() {
+  # Use all cores for compilation
+  configure_parallel_builds
+
   # OS-specific package installation
   install_packages
 
