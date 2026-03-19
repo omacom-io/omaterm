@@ -57,8 +57,8 @@ install_mise_tools() {
 
   mise use -g node
 
-  mise settings add ruby.compile false
-  mise settings add idiomatic_version_file_enable_tools ruby
+  mise settings set ruby.compile false
+  mise settings set idiomatic_version_file_enable_tools ruby
   mise use -g ruby
 
   export PATH="$HOME/.local/share/mise/shims:$PATH"
