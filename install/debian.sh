@@ -11,8 +11,11 @@ install_packages() {
     vim neovim luarocks \
     clang llvm rustc libyaml-0-2 \
     curl wget gpg \
-    docker.io docker-buildx docker-compose \
+    docker.io docker-compose \
     kitty-terminfo
+
+  # docker-buildx (install separately as it can fail on some Ubuntu versions)
+  sudo apt-get install -y docker-buildx 2>/dev/null || true
 
   # tldr: Debian Trixie+ replaced tldr with tealdeer
   if apt-cache show tealdeer &>/dev/null; then
