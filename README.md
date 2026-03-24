@@ -22,6 +22,14 @@ curl -fsSL https://omaterm.org/install | bash
 - **Networking**: SSH, tailscale
 - **Git**: Interactive config for user name/email, helpful aliases
 
+## Docker
+
+```bash
+docker run -it -v omaterm-home:/home/omaterm ghcr.io/omacom-io/omaterm
+```
+
+The named volume persists your home directory across container restarts, including git config, gh auth, shell history, and projects.
+
 ## Interactive prompts
 
 During installation you'll be asked for:
