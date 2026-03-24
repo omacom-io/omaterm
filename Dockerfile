@@ -29,10 +29,8 @@ RUN git clone https://aur.archlinux.org/yay-bin.git /tmp/yay && \
 # Install AUR packages
 RUN yay -S --needed --noconfirm claude-code
 
-# Pre-set git config to avoid interactive prompts, then install omadots
-RUN git config --global user.name "omaterm" && \
-    git config --global user.email "omaterm@localhost" && \
-    curl -fsSL https://raw.githubusercontent.com/omacom-io/omadots/refs/heads/master/install.sh | bash
+# Install omadots
+RUN curl -fsSL https://raw.githubusercontent.com/omacom-io/omadots/refs/heads/master/install.sh | bash
 
 # Copy configs and bins
 COPY --chown=omaterm:omaterm config/ /home/omaterm/.config/
@@ -51,4 +49,4 @@ RUN eval "$(mise activate bash)" && \
 
 ENV PATH="/home/omaterm/.local/share/mise/shims:/home/omaterm/.local/bin:${PATH}"
 
-CMD ["/bin/bash", "-l"]
+ENTRYPOINT ["/home/omaterm/.local/bin/omaterm-setup"]
