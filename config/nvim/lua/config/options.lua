@@ -1,16 +1,13 @@
-if vim.env.TMUX then
-	vim.g.clipboard = {
-		name = "tmux",
-		copy = {
-			["+"] = { "tmux", "load-buffer", "-" },
-			["*"] = { "tmux", "load-buffer", "-" },
-		},
-		paste = {
-			["+"] = { "tmux", "save-buffer", "-" },
-			["*"] = { "tmux", "save-buffer", "-" },
-		},
-		cache_enabled = 0,
-	}
+vim.opt.clipboard = "unnamedplus"
 
-	vim.opt.clipboard = "unnamedplus"
-end
+vim.g.clipboard = {
+	name = "OSC 52",
+	copy = {
+		["+"] = require("vim.ui.clipboard.osc52").copy("+"),
+		["*"] = require("vim.ui.clipboard.osc52").copy("*"),
+	},
+	paste = {
+		["+"] = require("vim.ui.clipboard.osc52").paste("+"),
+		["*"] = require("vim.ui.clipboard.osc52").paste("*"),
+	},
+}

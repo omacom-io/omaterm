@@ -31,7 +31,7 @@ RUN git clone https://aur.archlinux.org/yay-bin.git /tmp/yay && \
 RUN yay -S --needed --noconfirm claude-code
 
 # Install omadots
-RUN curl -fsSL https://raw.githubusercontent.com/omacom-io/omadots/refs/heads/master/install.sh | bash
+RUN curl -fsSL https://raw.githubusercontent.com/hattapauzi/omadots/main/install.sh | bash
 
 # Copy configs and bins
 COPY --chown=omaterm:omaterm config/ /home/omaterm/.config/

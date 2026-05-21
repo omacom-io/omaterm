@@ -52,15 +52,15 @@ prompt_confirm() {
   fi
 
   while true; do
-    printf "%s %s " "$prompt" "$suffix" > /dev/tty
-    IFS= read -r reply < /dev/tty || return 1
+    printf "%s %s " "$prompt" "$suffix" >/dev/tty
+    IFS= read -r reply </dev/tty || return 1
     reply="${reply,,}"
 
     case "$reply" in
-      "") [ "$default" = "y" ] && return 0 || return 1 ;;
-      y|yes) return 0 ;;
-      n|no) return 1 ;;
-      *) echo "Please answer yes or no." > /dev/tty ;;
+    "") [ "$default" = "y" ] && return 0 || return 1 ;;
+    y | yes) return 0 ;;
+    n | no) return 1 ;;
+    *) echo "Please answer yes or no." >/dev/tty ;;
     esac
   done
 }
@@ -86,17 +86,17 @@ prompt_username() {
   local username
 
   while true; do
-    printf "User to use/create [%s]: " "$default_user" > /dev/tty
-    IFS= read -r username < /dev/tty || return 1
+    printf "User to use/create [%s]: " "$default_user" >/dev/tty
+    IFS= read -r username </dev/tty || return 1
     username="${username:-$default_user}"
 
     if [ "$username" = "root" ]; then
-      echo "Please choose a non-root user." > /dev/tty
+      echo "Please choose a non-root user." >/dev/tty
     elif [[ "$username" =~ ^[a-z_][a-z0-9_-]*[$]?$ ]]; then
       echo "$username"
       return 0
     else
-      echo "Use a Linux username like 'omaterm' or 'alice'." > /dev/tty
+      echo "Use a Linux username like 'omaterm' or 'alice'." >/dev/tty
     fi
   done
 }
@@ -110,23 +110,23 @@ ensure_root_bootstrap_tools() {
 
   section "Installing sudo..."
   case "$os_id" in
-    arch)
-      pacman -Syu --needed --noconfirm sudo
-      ;;
-    debian)
-      apt-get update
-      apt-get install -y sudo
-      ;;
-    fedora)
-      dnf install -y sudo
-      ;;
+  arch)
+    pacman -Syu --needed --noconfirm sudo
+    ;;
+  debian)
+    apt-get update
+    apt-get install -y sudo
+    ;;
+  fedora)
+    dnf install -y sudo
+    ;;
   esac
 }
 
 admin_group_for_os() {
   case "$1" in
-    debian) echo "sudo" ;;
-    arch|fedora) echo "wheel" ;;
+  debian) echo "sudo" ;;
+  arch | fedora) echo "wheel" ;;
   esac
 }
 
@@ -149,7 +149,7 @@ ensure_install_user() {
   usermod -aG "$admin_group" "$username"
 
   mkdir -p /etc/sudoers.d
-  printf "%%%s ALL=(ALL:ALL) ALL\n" "$admin_group" > "/etc/sudoers.d/10-omaterm-$admin_group"
+  printf "%%%s ALL=(ALL:ALL) ALL\n" "$admin_group" >"/etc/sudoers.d/10-omaterm-$admin_group"
   chmod 0440 "/etc/sudoers.d/10-omaterm-$admin_group"
   echo "✓ Added $username to $admin_group"
 }
@@ -203,7 +203,7 @@ maybe_reexec_as_non_root() {
 }
 
 install_omadots() {
-  curl -fsSL https://raw.githubusercontent.com/omacom-io/omadots/refs/heads/master/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/hattapauzi/omadots/main/install.sh | bash
 }
 
 install_configs() {
@@ -215,8 +215,8 @@ install_configs() {
 
   local shell_rc
   case "$(basename "$SHELL")" in
-    zsh) shell_rc="$HOME/.zshrc" ;;
-    *) shell_rc="$HOME/.bashrc" ;;
+  zsh) shell_rc="$HOME/.zshrc" ;;
+  *) shell_rc="$HOME/.bashrc" ;;
   esac
 
   if ! grep -qF '[[ -z $TMUX ]]' "$shell_rc" 2>/dev/null; then
@@ -375,9 +375,9 @@ fi
 # Ensure correct git is installed
 if ! command -v git &>/dev/null; then
   case "$OS_ID" in
-    arch) as_root pacman -Syu --needed --noconfirm git ;;
-    debian) as_root apt-get update && as_root apt-get install -y git ;;
-    fedora) as_root dnf install -y git ;;
+  arch) as_root pacman -Syu --needed --noconfirm git ;;
+  debian) as_root apt-get update && as_root apt-get install -y git ;;
+  fedora) as_root dnf install -y git ;;
   esac
 fi
 
@@ -392,9 +392,9 @@ maybe_reexec_as_non_root "$OS_ID" "$INSTALLER_DIR"
 
 # OS detection and dispatch
 case "$OS_ID" in
-  arch) source "$INSTALLER_DIR/install/arch.sh" ;;
-  debian) source "$INSTALLER_DIR/install/debian.sh" ;;
-  fedora) source "$INSTALLER_DIR/install/fedora.sh" ;;
+arch) source "$INSTALLER_DIR/install/arch.sh" ;;
+debian) source "$INSTALLER_DIR/install/debian.sh" ;;
+fedora) source "$INSTALLER_DIR/install/fedora.sh" ;;
 esac
 
 run_installation
