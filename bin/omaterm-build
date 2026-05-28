@@ -21,22 +21,9 @@ omaterm-build push  builds and pushes ghcr.io/omacom-io/omaterm:latest
 EOF
 }
 
-if [ "$#" -gt 1 ]; then
-  usage
-  exit 1
-fi
-
 case "$COMMAND" in
-  test)
-    IMAGE="${OMATERM_IMAGE:-omaterm:local}"
-    ;;
-  push)
-    IMAGE="${OMATERM_IMAGE:-ghcr.io/omacom-io/omaterm:latest}"
-    ;;
-  -h|--help|help)
-    usage
-    exit 0
-    ;;
+  test) IMAGE="${OMATERM_IMAGE:-omaterm:local}" ;;
+  push) IMAGE="${OMATERM_IMAGE:-ghcr.io/omacom-io/omaterm:latest}" ;;
   *)
     usage
     exit 1
@@ -69,12 +56,6 @@ fi
 docker build --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN -t "$IMAGE" "$REPO_ROOT"
 
 case "$COMMAND" in
-  push)
-    docker push "$IMAGE"
-    ;;
-  test)
-    docker run -it --rm \
-      --mount type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock \
-      "$IMAGE"
-    ;;
+  push) docker push "$IMAGE" ;;
+  test) docker run -it --rm --mount type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock "$IMAGE" ;;
 esac
