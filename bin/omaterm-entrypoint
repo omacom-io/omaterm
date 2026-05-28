@@ -46,18 +46,44 @@ ensure_docker_group() {
   usermod -aG docker omaterm
 }
 
+dockerd_responding() {
+  docker --host "$DIND_HOST" info &>/dev/null
+}
+
+# Prefer overlay2 (copy-on-write) and only fall back to the slow, disk-heavy
+# vfs driver when faster drivers fail to start (e.g. overlay-on-overlay).
+DIND_STORAGE_DRIVERS=(overlay2 fuse-overlayfs vfs)
+
 start_dind() {
   mkdir -p /var/lib/docker "$(dirname "$DIND_SOCKET")"
 
-  if ! docker --host "$DIND_HOST" info &>/dev/null; then
-    ensure_docker_group
-    rm -f "$DIND_SOCKET"
-    dockerd --host "$DIND_HOST" --group docker --storage-driver=vfs >/var/log/dockerd.log 2>&1 &
-  fi
+  dockerd_responding && return 0
 
-  for _ in {1..60}; do
-    docker --host "$DIND_HOST" info &>/dev/null && return 0
-    sleep 1
+  ensure_docker_group
+
+  local driver dockerd_pid i
+  for driver in "${DIND_STORAGE_DRIVERS[@]}"; do
+    if [ "$driver" = "fuse-overlayfs" ] && ! command -v fuse-overlayfs &>/dev/null; then
+      continue
+    fi
+
+    rm -f "$DIND_SOCKET"
+    dockerd --host "$DIND_HOST" --group docker --storage-driver="$driver" \
+      >/var/log/dockerd.log 2>&1 &
+    dockerd_pid=$!
+
+    for i in {1..30}; do
+      if dockerd_responding; then
+        echo "Docker-in-Docker started with storage driver: $driver" >&2
+        return 0
+      fi
+      # Stop waiting early if dockerd already exited so we can try the next driver.
+      kill -0 "$dockerd_pid" 2>/dev/null || break
+      sleep 1
+    done
+
+    kill "$dockerd_pid" 2>/dev/null || true
+    wait "$dockerd_pid" 2>/dev/null || true
   done
 
   echo "Error: Docker-in-Docker daemon did not start." >&2
