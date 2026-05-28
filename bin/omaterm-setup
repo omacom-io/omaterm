@@ -49,6 +49,7 @@ setup_tailscale() {
       sudo rm -f /var/run/tailscale/tailscaled.sock
       sudo sh -c 'tailscaled --tun=userspace-networking --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock >/tmp/tailscaled.log 2>&1 &'
     elif systemctl cat tailscaled.service &>/dev/null; then
+      sudo systemctl reset-failed tailscaled.service || true
       sudo systemctl enable --now tailscaled.service
     else
       sudo sh -c 'tailscaled >/tmp/tailscaled.log 2>&1 &'
