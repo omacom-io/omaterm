@@ -43,7 +43,7 @@ The named container persists its filesystem across starts, including home direct
 - **Shell**: Bash with starship prompt, fzf, eza, zoxide, and tmux
 - **Editors**: Neovim (LazyVim)
 - **Agents**: opencode, claude-code, codex, gemini
-- **Dev tools**: mise, docker, GitHub CLI (`gh`), lazygit, lazydocker, hunk
+- **Dev tools**: mise, docker, GitHub CLI (`gh`), 1Password CLI (`op`), lazygit, lazydocker, hunk
 - **Dev envs**: Ruby, Node
 - **Networking**: SSH, tailscale
 - **Git**: Interactive config for user name/email, helpful aliases
@@ -63,3 +63,14 @@ And you'll be offered to setup:
 - SSH key-only authentication
 - Tailscale
 - GitHub
+- 1Password
+
+## 1Password before deploys
+
+Run this in the shell that will run your deploy:
+
+```bash
+op-unlock
+```
+
+This signs in to 1Password when needed and exports the session into the current shell so deploy tools can use `op`.

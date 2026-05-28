@@ -66,6 +66,44 @@ fi
 EOF
     echo "✓ Tmux auto-start"
   fi
+
+  install_shell_helpers "$shell_rc"
+}
+
+install_shell_helpers() {
+  local shell_rc="$1"
+
+  if grep -qF '# Omaterm shell helpers' "$shell_rc" 2>/dev/null; then
+    return
+  fi
+
+  cat >>"$shell_rc" <<'EOF'
+
+# Omaterm shell helpers
+op-unlock() {
+  local -a signin_args=()
+
+  command -v op >/dev/null || return 127
+
+  if op whoami >/dev/null 2>&1; then
+    echo "✓ 1Password unlocked"
+    return 0
+  fi
+
+  if ! op account list --format json 2>/dev/null | jq -e 'length > 0' >/dev/null; then
+    echo "No 1Password CLI account configured. Adding one now."
+    op account add || return
+  fi
+
+  if [ -n "${OP_ACCOUNT:-}" ]; then
+    signin_args+=(--account "$OP_ACCOUNT")
+  fi
+
+  eval "$(op signin "${signin_args[@]}")"
+  op whoami >/dev/null && echo "✓ 1Password unlocked"
+}
+EOF
+  echo "✓ 1Password helper"
 }
 
 install_bins() {
@@ -150,6 +188,34 @@ enable_services() {
   enable_ssh
 }
 
+signin_1password() {
+  local -a signin_args=()
+
+  if [ -n "${OP_ACCOUNT:-}" ]; then
+    signin_args+=(--account "$OP_ACCOUNT")
+  fi
+
+  eval "$(op signin "${signin_args[@]}")"
+  op whoami >/dev/null
+}
+
+setup_1password() {
+  command -v op &>/dev/null || return 0
+  op whoami &>/dev/null && return 0
+
+  echo
+  if ! gum confirm "Authenticate with 1Password?" </dev/tty; then
+    return 0
+  fi
+
+  if ! op account list --format json 2>/dev/null | jq -e 'length > 0' >/dev/null; then
+    op account add
+  fi
+
+  signin_1password
+  echo "✓ 1Password"
+}
+
 interactive_setup() {
   section "Interactive setup..."
 
@@ -159,6 +225,8 @@ interactive_setup() {
       gh auth login
     fi
   fi
+
+  setup_1password
 
   if ! tailscale status &>/dev/null; then
     echo

@@ -38,6 +38,70 @@ setup_git_identity() {
   echo "✓ Git identity"
 }
 
+install_shell_helpers() {
+  local shell_rc="$HOME/.bashrc"
+
+  if grep -qF '# Omaterm shell helpers' "$shell_rc" 2>/dev/null; then
+    return
+  fi
+
+  cat >>"$shell_rc" <<'EOF'
+
+# Omaterm shell helpers
+op-unlock() {
+  local -a signin_args=()
+
+  command -v op >/dev/null || return 127
+
+  if op whoami >/dev/null 2>&1; then
+    echo "✓ 1Password unlocked"
+    return 0
+  fi
+
+  if ! op account list --format json 2>/dev/null | jq -e 'length > 0' >/dev/null; then
+    echo "No 1Password CLI account configured. Adding one now."
+    op account add || return
+  fi
+
+  if [ -n "${OP_ACCOUNT:-}" ]; then
+    signin_args+=(--account "$OP_ACCOUNT")
+  fi
+
+  eval "$(op signin "${signin_args[@]}")"
+  op whoami >/dev/null && echo "✓ 1Password unlocked"
+}
+EOF
+  echo "✓ Shell helpers"
+}
+
+signin_1password() {
+  local -a signin_args=()
+
+  if [ -n "${OP_ACCOUNT:-}" ]; then
+    signin_args+=(--account "$OP_ACCOUNT")
+  fi
+
+  eval "$(op signin "${signin_args[@]}")"
+  op whoami >/dev/null
+}
+
+setup_1password() {
+  command -v op &>/dev/null || return 0
+  op whoami &>/dev/null && return 0
+
+  echo
+  if ! gum confirm "Authenticate with 1Password?"; then
+    return 0
+  fi
+
+  if ! op account list --format json 2>/dev/null | jq -e 'length > 0' >/dev/null; then
+    op account add
+  fi
+
+  signin_1password
+  echo "✓ 1Password"
+}
+
 start_tailscaled() {
   if is_docker; then
     sudo mkdir -p /var/lib/tailscale /var/run/tailscale
@@ -135,6 +199,9 @@ echo
 # Git identity
 setup_git_identity
 
+# Shell helpers
+install_shell_helpers
+
 # GitHub CLI
 if ! gh auth status &>/dev/null; then
   echo
@@ -142,6 +209,9 @@ if ! gh auth status &>/dev/null; then
     gh auth login
   fi
 fi
+
+# 1Password CLI
+setup_1password
 
 # SSH public key
 setup_ssh_public_key
