@@ -257,7 +257,7 @@ install_mise_tools() {
   eval "$(mise activate bash)" 2>/dev/null || true
 
   mise settings set idiomatic_version_file_enable_tools ruby
-  mise use -g -y node ruby neovim starship eza gum gh lazygit lazydocker opencode claude-code codex
+  mise use -g -y node ruby neovim starship eza gum gh lazygit lazydocker opencode claude-code codex gemini aqua:modem-dev/hunk
 
   export PATH="$HOME/.local/share/mise/shims:$PATH"
 }
