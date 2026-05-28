@@ -46,6 +46,28 @@ read_package_file() {
   grep -vE '^[[:space:]]*(#|$)' "$1"
 }
 
+setup_omaterm_user() {
+  local answer
+
+  read -r -p "You can't install as root. Add omaterm user? [Y/n] " answer </dev/tty
+
+  if [[ "$answer" =~ ^[Nn]([Oo])?$ ]]; then
+    exit 1
+  fi
+
+  if ! id omaterm &>/dev/null; then
+    useradd -m -s /bin/bash omaterm
+    passwd omaterm
+  fi
+
+  mkdir -p /etc/sudoers.d
+  printf 'omaterm ALL=(ALL) ALL\n' >/etc/sudoers.d/omaterm
+  chmod 0440 /etc/sudoers.d/omaterm
+
+  echo "Switching to omaterm. Run the Omaterm installer again from there."
+  exec su - omaterm
+}
+
 install_omadots() {
   curl -fsSL https://raw.githubusercontent.com/omacom-io/omadots/refs/heads/master/install.sh | bash
 }
@@ -176,9 +198,7 @@ show_banner
 section "Installing Omaterm..."
 
 if [ "$EUID" -eq 0 ]; then
-  echo "Error: Do not run the Omaterm installer as root."
-  echo "Log in as a normal sudo-capable user and run it again."
-  exit 1
+  setup_omaterm_user
 fi
 
 if ! OS_ID="$(detect_os)"; then
