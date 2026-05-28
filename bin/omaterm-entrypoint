@@ -37,19 +37,12 @@ start_tailscaled_if_configured() {
   fi
 }
 
-setup_docker_socket_access() {
-  local docker_gid docker_socket="${1:-/var/run/docker.sock}"
-
-  [ -S "$docker_socket" ] || return 0
-
-  docker_gid="$(stat -c "%g" "$docker_socket")"
-
-  if getent group docker &>/dev/null; then
-    groupmod -o -g "$docker_gid" docker
-  else
-    groupadd -o -g "$docker_gid" docker
-  fi
-
+# Give the docker group a real, non-zero GID and own the DinD socket with it.
+# Creating the group *before* dockerd (and passing --group docker) means the
+# socket is created root:docker; otherwise dockerd falls back to root:root and
+# we'd have to map the docker group onto GID 0, granting omaterm the root group.
+ensure_docker_group() {
+  getent group docker &>/dev/null || groupadd docker
   usermod -aG docker omaterm
 }
 
@@ -57,8 +50,9 @@ start_dind() {
   mkdir -p /var/lib/docker "$(dirname "$DIND_SOCKET")"
 
   if ! docker --host "$DIND_HOST" info &>/dev/null; then
+    ensure_docker_group
     rm -f "$DIND_SOCKET"
-    dockerd --host "$DIND_HOST" --storage-driver=vfs >/var/log/dockerd.log 2>&1 &
+    dockerd --host "$DIND_HOST" --group docker --storage-driver=vfs >/var/log/dockerd.log 2>&1 &
   fi
 
   for _ in {1..60}; do
@@ -73,7 +67,6 @@ start_dind() {
 
 /home/omaterm/.local/bin/omaterm-setup-sudopw
 start_dind
-setup_docker_socket_access "$DIND_SOCKET"
 start_tailscaled_if_configured
 
 OMATERM_ENV=(
