@@ -73,7 +73,6 @@ install_bins() {
   mkdir -p "$HOME/.local/bin"
   cp -Rf "$INSTALLER_DIR/bin/"* "$HOME/.local/bin/"
   chmod +x "$HOME/.local/bin/"*
-  echo "✓ omaterm-ssh"
   echo "✓ omaterm-theme"
   echo "✓ omaterm-refresh"
 }
@@ -109,11 +108,15 @@ install_mise_tools() {
 }
 
 setup_docker_group() {
-  if ! groups | grep -q docker; then
+  local username
+
+  username="${USER:-$(id -un)}"
+
+  if ! id -nG "$username" | grep -qw docker; then
     if command -v usermod &>/dev/null; then
-      sudo usermod -aG docker "$USER"
+      sudo usermod -aG docker "$username"
     else
-      sudo adduser "$USER" docker
+      sudo adduser "$username" docker
     fi
   fi
 }

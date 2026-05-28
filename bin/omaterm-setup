@@ -71,6 +71,52 @@ setup_tailscale() {
   sudo tailscale up "${tailscale_args[@]}"
 }
 
+setup_ssh_public_key() {
+  local ssh_key
+
+  echo
+  if ! gum confirm "Add SSH public key for remote access?"; then
+    return
+  fi
+
+  mkdir -p "$HOME/.ssh"
+  chmod 700 "$HOME/.ssh"
+
+  ssh_key="$(gum input --placeholder "ssh-ed25519 AAAAC3..." --prompt "SSH key: ")"
+  if [ -z "$ssh_key" ]; then
+    return
+  fi
+
+  touch "$HOME/.ssh/authorized_keys"
+  chmod 600 "$HOME/.ssh/authorized_keys"
+
+  if grep -qxF "$ssh_key" "$HOME/.ssh/authorized_keys"; then
+    echo "SSH key already present in authorized_keys."
+  else
+    echo "$ssh_key" >>"$HOME/.ssh/authorized_keys"
+    echo "SSH key added to authorized_keys."
+  fi
+
+  if grep -q "^PasswordAuthentication no" /etc/ssh/sshd_config 2>/dev/null; then
+    return
+  fi
+
+  if ! gum confirm "Disable password authentication for SSH (key-based auth only)?"; then
+    return
+  fi
+
+  sudo sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+  sudo sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+
+  if systemctl cat sshd.service &>/dev/null; then
+    sudo systemctl restart sshd.service
+  elif systemctl cat ssh.service &>/dev/null; then
+    sudo systemctl restart ssh.service
+  fi
+
+  echo "SSH configured for key-based authentication only."
+}
+
 clear
 echo
 echo " ▄██████▄    ▄▄▄▄███▄▄▄▄      ▄████████     ███        ▄████████    ▄████████   ▄▄▄▄███▄▄▄▄
@@ -96,6 +142,9 @@ if ! gh auth status &>/dev/null; then
     gh auth login
   fi
 fi
+
+# SSH public key
+setup_ssh_public_key
 
 # Tailscale
 setup_tailscale

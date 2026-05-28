@@ -89,8 +89,25 @@ start_tailscaled_if_configured() {
   fi
 }
 
+setup_docker_socket_access() {
+  local docker_gid
+
+  [ -S /var/run/docker.sock ] || return 0
+
+  docker_gid="$(stat -c "%g" /var/run/docker.sock)"
+
+  if getent group docker &>/dev/null; then
+    groupmod -o -g "$docker_gid" docker
+  else
+    groupadd -o -g "$docker_gid" docker
+  fi
+
+  usermod -aG docker omaterm
+}
+
 setup_sudo_password
 setup_hostname
+setup_docker_socket_access
 start_tailscaled_if_configured
 
 exec runuser -u omaterm -- env \

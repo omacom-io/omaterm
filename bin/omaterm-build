@@ -16,7 +16,7 @@ usage() {
   cat >&2 <<'EOF'
 Usage: omaterm-build test|push
 
-omaterm-build test  builds omaterm:local and runs a disposable container
+omaterm-build test  builds omaterm:local and runs a disposable container with host Docker access
 omaterm-build push  builds and pushes ghcr.io/omacom-io/omaterm:latest
 EOF
 }
@@ -43,11 +43,13 @@ case "$COMMAND" in
     ;;
 esac
 
+echo "Using gh auth token for Docker build to avoid GitHub API rate-limit errors."
 if ! GITHUB_TOKEN="$(gh auth token)" || [ -z "$GITHUB_TOKEN" ]; then
   echo "Could not get a GitHub token from gh. Run: gh auth login" >&2
   exit 1
 fi
 export GITHUB_TOKEN
+export DOCKER_BUILDKIT=1
 
 if [ "$COMMAND" = "push" ]; then
   if ! GITHUB_USER="$(gh api user --jq .login)" || [ -z "$GITHUB_USER" ]; then
@@ -64,13 +66,15 @@ if [ "$COMMAND" = "push" ]; then
   fi
 fi
 
-DOCKER_BUILDKIT=1 docker build --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN -t "$IMAGE" "$REPO_ROOT"
+docker build --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN -t "$IMAGE" "$REPO_ROOT"
 
 case "$COMMAND" in
   push)
     docker push "$IMAGE"
     ;;
   test)
-    docker run -it --rm "$IMAGE"
+    docker run -it --rm \
+      --mount type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock \
+      "$IMAGE"
     ;;
 esac
