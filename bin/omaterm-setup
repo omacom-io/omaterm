@@ -41,8 +41,6 @@ setup_gh_authentication() {
 }
 
 setup_tailscale() {
-  local current_name tailnet_hostname tailscale_args
-
   tailscale status &>/dev/null && return
 
   if gum confirm "Connect to Tailscale?"; then
@@ -58,11 +56,11 @@ setup_tailscale() {
 
     sleep 2
 
-    current_name="$(cat "$TAILSCALE_HOSTNAME_FILE" 2>/dev/null || true)"
+    local current_name="$(cat "$TAILSCALE_HOSTNAME_FILE" 2>/dev/null || true)"
     current_name="${current_name:-$(hostname)}"
 
     while true; do
-      tailnet_hostname="$(gum input --prompt "Tailnet hostname: " --value "$current_name")"
+      local tailnet_hostname="$(gum input --prompt "Tailnet hostname: " --value "$current_name")"
       tailnet_hostname="${tailnet_hostname:-$current_name}"
 
       if [[ "$tailnet_hostname" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$ ]]; then
@@ -73,7 +71,7 @@ setup_tailscale() {
       echo "Use letters, numbers, and hyphens only, starting with a letter or number."
     done
 
-    tailscale_args=(--ssh --accept-routes --hostname="$tailnet_hostname")
+    local tailscale_args=(--ssh --accept-routes --hostname="$tailnet_hostname")
 
     sudo tailscale up "${tailscale_args[@]}"
     echo "✓ Tailscale"
