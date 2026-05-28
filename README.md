@@ -22,7 +22,7 @@ curl -fsSL https://omaterm.org/install | bash
 docker run -it --name omaterm ghcr.io/omacom-io/omaterm
 ```
 
-The first run starts an interactive setup, including prompts to set the `omaterm` sudo password, choose a hostname, add an SSH public key, and connect to Tailscale. Inside Docker, Tailscale runs in userspace networking mode and restarts automatically with the named container.
+The first run starts an interactive setup, including prompts to set the `omaterm` sudo password, add an SSH public key, and connect to Tailscale with a Tailnet hostname. Inside Docker, Tailscale runs in userspace networking mode and restarts automatically with the named container.
 
 If you need omaterm to be able to run its own Docker containers, you can give it access to the host Docker engine:
 

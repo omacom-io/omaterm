@@ -2,6 +2,7 @@
 set -euo pipefail
 
 MARKER="$HOME/.omaterm-setup-done"
+TAILSCALE_HOSTNAME_FILE="/etc/omaterm-tailscale-hostname"
 
 if [ -f "$MARKER" ]; then
   exit 0
@@ -94,7 +95,7 @@ start_tailscaled() {
 }
 
 setup_tailscale() {
-  local tailscale_args
+  local tailscale_args tailnet_hostname
 
   command -v tailscale &>/dev/null || return 0
   tailscale status &>/dev/null && return
@@ -107,11 +108,30 @@ setup_tailscale() {
   start_tailscaled
 
   tailscale_args=(--ssh --accept-routes)
-  if [ -n "${OMATERM_HOSTNAME:-}" ]; then
-    tailscale_args+=(--hostname="$OMATERM_HOSTNAME")
-  fi
+  tailnet_hostname="$(setup_tailnet_hostname)"
+  tailscale_args+=(--hostname="$tailnet_hostname")
 
   sudo tailscale up "${tailscale_args[@]}"
+}
+
+setup_tailnet_hostname() {
+  local current_name tailnet_hostname
+
+  current_name="$(cat "$TAILSCALE_HOSTNAME_FILE" 2>/dev/null || true)"
+  current_name="${current_name:-$(hostname)}"
+
+  while true; do
+    tailnet_hostname="$(gum input --prompt "Tailnet hostname: " --value "$current_name")"
+    tailnet_hostname="${tailnet_hostname:-$current_name}"
+
+    if [[ "$tailnet_hostname" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$ ]]; then
+      printf "%s\n" "$tailnet_hostname" | sudo tee "$TAILSCALE_HOSTNAME_FILE" >/dev/null
+      printf "%s\n" "$tailnet_hostname"
+      return
+    fi
+
+    echo "Use letters, numbers, and hyphens only, starting with a letter or number."
+  done
 }
 
 setup_proxmox_serial_console() {
