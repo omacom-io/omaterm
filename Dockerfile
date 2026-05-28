@@ -4,7 +4,8 @@ FROM archlinux:latest
 COPY packaging/arch.packages /tmp/arch.packages
 
 # Update system and install official/Omarchy packages
-RUN printf '\n[omarchy]\nSigLevel = Optional TrustAll\nServer = https://pkgs.omarchy.org/stable/$arch\n' >> /etc/pacman.conf && \
+RUN printf 'Server = https://mirror.omarchy.org/$repo/os/$arch\n' > /etc/pacman.d/mirrorlist && \
+    printf '\n[omarchy]\nSigLevel = Optional TrustAll\nServer = https://pkgs.omarchy.org/edge/$arch\n' >> /etc/pacman.conf && \
     pacman -Syu --needed --noconfirm $(grep -vE '^[[:space:]]*(#|$)' /tmp/arch.packages) && \
     pacman -Scc --noconfirm
 

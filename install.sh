@@ -42,6 +42,12 @@ as_root() {
   fi
 }
 
+setup_arch_package_mirror() {
+  as_root tee /etc/pacman.d/mirrorlist >/dev/null <<'EOF'
+Server = https://mirror.omarchy.org/$repo/os/$arch
+EOF
+}
+
 read_package_file() {
   grep -vE '^[[:space:]]*(#|$)' "$1"
 }
@@ -193,7 +199,7 @@ fi
 # Ensure correct git is installed
 if ! command -v git &>/dev/null; then
   case "$OS_ID" in
-    arch) as_root pacman -Syu --needed --noconfirm git ;;
+    arch) setup_arch_package_mirror && as_root pacman -Syu --needed --noconfirm git ;;
     debian) as_root apt-get update && as_root apt-get install -y git ;;
     fedora) as_root dnf install -y git ;;
   esac

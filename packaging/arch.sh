@@ -1,14 +1,16 @@
 setup_arch_package_repositories() {
   section "Configuring Omarchy package repository..."
 
+  setup_arch_package_mirror
+
   if grep -qxF "[omarchy]" /etc/pacman.conf; then
-    sudo sed -i '/^\[omarchy\]$/,/^\[/{s|^SigLevel = .*|SigLevel = Optional TrustAll|; s|^Server = https://pkgs\.omarchy\.org/[^/]*/\$arch|Server = https://pkgs.omarchy.org/stable/$arch|}' /etc/pacman.conf
+    sudo sed -i '/^\[omarchy\]$/,/^\[/{s|^SigLevel = .*|SigLevel = Optional TrustAll|; s|^Server = https://pkgs\.omarchy\.org/[^/]*/\$arch|Server = https://pkgs.omarchy.org/edge/$arch|}' /etc/pacman.conf
   else
     sudo tee -a /etc/pacman.conf >/dev/null <<'EOF'
 
 [omarchy]
 SigLevel = Optional TrustAll
-Server = https://pkgs.omarchy.org/stable/$arch
+Server = https://pkgs.omarchy.org/edge/$arch
 EOF
   fi
 }
