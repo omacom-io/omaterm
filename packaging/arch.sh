@@ -17,6 +17,26 @@ EOF
   fi
 }
 
+reboot_if_kernel_upgraded() {
+  if [ -d "/lib/modules/$(uname -r)" ]; then
+    return
+  fi
+
+  section "Kernel was upgraded during package install"
+  echo "The running kernel ($(uname -r)) no longer has matching modules on disk,"
+  echo "so services like tailscaled, docker, and iptables will fail to start."
+  echo "A reboot is required before Omaterm setup can continue."
+  echo
+
+  if gum confirm "Reboot now and re-run the Omaterm installer afterwards?"; then
+    sudo systemctl reboot
+    exit 0
+  fi
+
+  echo "Aborting. Reboot and re-run the Omaterm installer to continue."
+  exit 1
+}
+
 install_packages() {
   local -a official_pkgs
 
@@ -26,4 +46,5 @@ install_packages() {
 
   section "Installing Arch packages..."
   sudo pacman -Syu --needed --noconfirm "${official_pkgs[@]}"
+  reboot_if_kernel_upgraded
 }
