@@ -48,6 +48,20 @@ install_omadots() {
   curl -fsSL https://raw.githubusercontent.com/omacom-io/omadots/refs/heads/master/install.sh | bash
 }
 
+install_mise_tools() {
+  local -a mise_packages
+
+  section "Installing mise tools..."
+  eval "$(mise activate bash)" 2>/dev/null || true
+
+  mapfile -t mise_packages < <(read_package_file "$INSTALLER_DIR/packaging/mise.packages")
+
+  mise settings set idiomatic_version_file_enable_tools ruby
+  mise use -g -y "${mise_packages[@]}"
+
+  export PATH="$HOME/.local/share/mise/shims:$PATH"
+}
+
 install_configs() {
   section "Installing configs..."
   mkdir -p "$HOME/.config"
@@ -75,20 +89,6 @@ install_bins() {
   chmod +x "$HOME/.local/bin/"*
   echo "✓ omaterm-theme"
   echo "✓ omaterm-refresh"
-}
-
-install_mise_tools() {
-  local -a mise_packages
-
-  section "Installing mise tools..."
-  eval "$(mise activate bash)" 2>/dev/null || true
-
-  mapfile -t mise_packages < <(read_package_file "$INSTALLER_DIR/packaging/mise.packages")
-
-  mise settings set idiomatic_version_file_enable_tools ruby
-  mise use -g -y "${mise_packages[@]}"
-
-  export PATH="$HOME/.local/share/mise/shims:$PATH"
 }
 
 enable_docker() {
@@ -143,21 +143,7 @@ run_first_setup() {
   "$HOME/.local/bin/omaterm-setup"
 }
 
-configure_parallel_builds() {
-  section "Configuring parallel compilation..."
-  export MAKEFLAGS="-j$(nproc)"
-
-  if [ -f /etc/makepkg.conf ]; then
-    sudo sed -i "s/^#\?MAKEFLAGS=.*/MAKEFLAGS=\"-j$(nproc)\"/" /etc/makepkg.conf
-  fi
-
-  echo "✓ Using $(nproc) cores for compilation"
-}
-
 run_installation() {
-  # Use all cores for compilation
-  configure_parallel_builds
-
   # OS-specific package installation
   install_packages
 

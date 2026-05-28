@@ -1,9 +1,6 @@
 # syntax=docker/dockerfile:1
 FROM archlinux:latest
 
-# Use all cores for compilation
-RUN echo "MAKEFLAGS=\"-j$(nproc)\"" >> /etc/makepkg.conf
-
 COPY packaging/arch.packages /tmp/arch.packages
 
 # Update system and install official packages
