@@ -25,8 +25,8 @@ setup_git_identity() {
       git_email="$(gum input --prompt "Git Email: ")"
     done
 
-    git config --global user.name "$git_name"
-    git config --global user.email "$git_email"
+    git config --global user.name "$git_name" || return 1
+    git config --global user.email "$git_email" || return 1
     echo "✓ Git"
     echo
   fi
@@ -34,7 +34,7 @@ setup_git_identity() {
 
 setup_gh_authentication() {
   if ! gh auth status &>/dev/null && gum confirm "Authenticate with GitHub?"; then
-    gh auth login
+    gh auth login || return 1
     echo "✓ GitHub"
     echo
   fi
@@ -45,19 +45,15 @@ setup_tailscale() {
 
   if gum confirm "Connect to Tailscale?"; then
     if [ "${OMATERM_DOCKER:-}" = "1" ] || [ -f /.dockerenv ]; then
-      sudo mkdir -p /var/lib/tailscale /var/run/tailscale
-      sudo rm -f /var/run/tailscale/tailscaled.sock
-      sudo sh -c 'tailscaled --tun=userspace-networking --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock >/tmp/tailscaled.log 2>&1 &'
+      sudo mkdir -p /var/lib/tailscale /var/run/tailscale || return 1
+      sudo rm -f /var/run/tailscale/tailscaled.sock || return 1
+      sudo sh -c 'tailscaled --tun=userspace-networking --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock >/tmp/tailscaled.log 2>&1 &' || return 1
     elif systemctl cat tailscaled.service &>/dev/null; then
-      sudo systemctl daemon-reload
-      sudo systemctl reset-failed tailscaled.service 2>/dev/null || true
-      sudo systemctl enable tailscaled.service
-      sudo systemctl start tailscaled.service
+      sudo systemctl daemon-reload || return 1
+      sudo systemctl enable --now tailscaled.service || return 1
     else
-      sudo sh -c 'tailscaled >/tmp/tailscaled.log 2>&1 &'
+      sudo sh -c 'tailscaled >/tmp/tailscaled.log 2>&1 &' || return 1
     fi
-
-    sleep 2
 
     local current_name="$(cat "$TAILSCALE_HOSTNAME_FILE" 2>/dev/null || true)"
     current_name="${current_name:-$(hostname)}"
@@ -68,7 +64,7 @@ setup_tailscale() {
       tailnet_hostname="${tailnet_hostname:-$current_name}"
 
       if [[ "$tailnet_hostname" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$ ]]; then
-        printf "%s\n" "$tailnet_hostname" | sudo tee "$TAILSCALE_HOSTNAME_FILE" >/dev/null
+        printf "%s\n" "$tailnet_hostname" | sudo tee "$TAILSCALE_HOSTNAME_FILE" >/dev/null || return 1
         break
       fi
 
@@ -79,7 +75,7 @@ setup_tailscale() {
 
     echo
     echo "Bringing up Tailscale..."
-    sudo tailscale up "${tailscale_args[@]}"
+    sudo tailscale up "${tailscale_args[@]}" || return 1
     echo "✓ Tailscale"
     echo
   fi
@@ -89,21 +85,21 @@ setup_ssh_public_key() {
   local ssh_key
 
   if gum confirm "Replace password with SSH public key for remote access?"; then
-    mkdir -p "$HOME/.ssh"
-    chmod 700 "$HOME/.ssh"
+    mkdir -p "$HOME/.ssh" || return 1
+    chmod 700 "$HOME/.ssh" || return 1
 
     ssh_key="$(gum input --placeholder "ssh-ed25519 AAAAC3..." --prompt "SSH key: ")"
     if [ -z "$ssh_key" ]; then
       return
     fi
 
-    touch "$HOME/.ssh/authorized_keys"
-    chmod 600 "$HOME/.ssh/authorized_keys"
+    touch "$HOME/.ssh/authorized_keys" || return 1
+    chmod 600 "$HOME/.ssh/authorized_keys" || return 1
 
     if grep -qxF "$ssh_key" "$HOME/.ssh/authorized_keys"; then
       echo "SSH key already present in authorized_keys."
     else
-      echo "$ssh_key" >>"$HOME/.ssh/authorized_keys"
+      echo "$ssh_key" >>"$HOME/.ssh/authorized_keys" || return 1
       echo "SSH key added to authorized_keys."
     fi
 
@@ -115,13 +111,13 @@ setup_ssh_public_key() {
       return
     fi
 
-    sudo sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
-    sudo sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+    sudo sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config || return 1
+    sudo sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config || return 1
 
     if systemctl cat sshd.service &>/dev/null; then
-      sudo systemctl restart sshd.service
+      sudo systemctl restart sshd.service || return 1
     elif systemctl cat ssh.service &>/dev/null; then
-      sudo systemctl restart ssh.service
+      sudo systemctl restart ssh.service || return 1
     fi
 
     echo "✓ SSH"
@@ -134,14 +130,28 @@ setup_1password() {
 
   if gum confirm "Authenticate with 1Password?"; then
     if ! op account list --format json 2>/dev/null | jq -e 'length > 0' >/dev/null; then
-      eval "$(op account add --signin)"
+      eval "$(op account add --signin)" || return 1
     else
-      eval "$(op signin)"
+      eval "$(op signin)" || return 1
     fi
 
     echo "✓ 1Password"
     echo
   fi
+}
+
+run_setup_section() {
+  local label="$1"
+  shift
+
+  if "$@"; then
+    return 0
+  fi
+
+  echo
+  echo "Skipping $label after an error."
+  echo
+  return 0
 }
 
 clear
@@ -160,11 +170,11 @@ echo "Welcome to Omaterm! Let's get you set up."
 echo
 
 # Git identity
-setup_git_identity
-setup_gh_authentication
-setup_tailscale
-setup_ssh_public_key
-setup_1password
+run_setup_section "Git identity" setup_git_identity
+run_setup_section "GitHub authentication" setup_gh_authentication
+run_setup_section "Tailscale setup" setup_tailscale
+run_setup_section "SSH key setup" setup_ssh_public_key
+run_setup_section "1Password authentication" setup_1password
 
 echo
 gum spin --spinner "globe" --title "Setup done! Press any key to tmux..." -- bash -c 'read -n 1 -s'
