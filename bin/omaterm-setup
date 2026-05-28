@@ -11,25 +11,6 @@ is_docker() {
   [ "${OMATERM_DOCKER:-}" = "1" ] || [ -f /.dockerenv ]
 }
 
-setup_sudo_password() {
-  local username
-  username="${USER:-$(id -un)}"
-
-  if ! is_docker || ! sudo -n grep -q NOPASSWD /etc/sudoers.d/omaterm 2>/dev/null; then
-    return
-  fi
-
-  echo "Set a sudo password for $username."
-  until sudo passwd "$username"; do
-    echo "Password setup failed. Try again."
-  done
-
-  printf "%s ALL=(ALL) ALL\n" "$username" | sudo sh -c 'cat > /etc/sudoers.d/omaterm && chmod 0440 /etc/sudoers.d/omaterm'
-  sudo -k
-
-  echo
-}
-
 setup_git_identity() {
   local git_name git_email
 
@@ -57,6 +38,40 @@ setup_git_identity() {
   echo "✓ Git identity"
 }
 
+start_tailscaled() {
+  if is_docker; then
+    sudo mkdir -p /var/lib/tailscale /var/run/tailscale
+    sudo rm -f /var/run/tailscale/tailscaled.sock
+    sudo sh -c 'tailscaled --tun=userspace-networking --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock >/tmp/tailscaled.log 2>&1 &'
+  else
+    sudo sh -c 'tailscaled >/tmp/tailscaled.log 2>&1 &'
+  fi
+
+  sleep 2
+}
+
+setup_tailscale() {
+  local tailscale_args
+
+  command -v tailscale &>/dev/null || return 0
+  tailscale status &>/dev/null && return
+
+  echo
+  if ! gum confirm "Connect to Tailscale?"; then
+    return 0
+  fi
+
+  start_tailscaled
+
+  tailscale_args=(--ssh --accept-routes)
+  if [ -n "${OMATERM_HOSTNAME:-}" ]; then
+    tailscale_args+=(--hostname="$OMATERM_HOSTNAME")
+  fi
+
+  sudo tailscale up "${tailscale_args[@]}"
+}
+
+clear
 echo
 echo " ▄██████▄    ▄▄▄▄███▄▄▄▄      ▄████████     ███        ▄████████    ▄████████   ▄▄▄▄███▄▄▄▄
 ███    ███ ▄██▀▀▀███▀▀▀██▄   ███    ███ ▀█████████▄   ███    ███   ███    ███ ▄██▀▀▀███▀▀▀██▄
@@ -71,8 +86,6 @@ echo
 echo "Welcome to Omaterm! Let's get you set up."
 echo
 
-setup_sudo_password
-
 # Git identity
 setup_git_identity
 
@@ -85,13 +98,7 @@ if ! gh auth status &>/dev/null; then
 fi
 
 # Tailscale
-if command -v tailscale &>/dev/null && ! tailscale status &>/dev/null; then
-  echo
-  if gum confirm "Connect to Tailscale?"; then
-    sudo tailscaled &>/dev/null &
-    sudo tailscale up --ssh --accept-routes
-  fi
-fi
+setup_tailscale
 
 echo
 echo "✓ Setup complete!"

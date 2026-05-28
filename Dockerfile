@@ -1,20 +1,17 @@
+# syntax=docker/dockerfile:1
 FROM archlinux:latest
 
 # Use all cores for compilation
 RUN echo "MAKEFLAGS=\"-j$(nproc)\"" >> /etc/makepkg.conf
 
+COPY install/arch.packages /tmp/arch.packages
+
 # Update system and install official packages
-RUN pacman -Syu --needed --noconfirm \
-      base-devel git openssh sudo less inetutils whois \
-      fzf zoxide tmux btop jq man-db \
-      vim luarocks \
-      clang llvm rust mise libyaml \
-      docker docker-buildx docker-compose \
-      kitty-terminfo && \
+RUN pacman -Syu --needed --noconfirm $(grep -vE '^[[:space:]]*(#|$)' /tmp/arch.packages) && \
     pacman -Scc --noconfirm
 
 # Create a non-root user
-RUN useradd -m -s /bin/bash omaterm && \
+RUN useradd -m -u 1000 -s /bin/bash omaterm && \
     echo "omaterm ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/omaterm && \
     chmod 0440 /etc/sudoers.d/omaterm
 
@@ -34,6 +31,7 @@ RUN curl -fsSL https://raw.githubusercontent.com/omacom-io/omadots/refs/heads/ma
 # Copy configs and bins
 COPY --chown=omaterm:omaterm config/ /home/omaterm/.config/
 COPY --chown=omaterm:omaterm bin/ /home/omaterm/.local/bin/
+COPY --chown=omaterm:omaterm install/mise.packages /tmp/mise.packages
 RUN chmod +x /home/omaterm/.local/bin/*
 
 # Auto-start tmux in .bashrc
@@ -45,11 +43,15 @@ fi
 EOF
 
 # Install user tools via mise
-RUN eval "$(mise activate bash)" && \
+RUN --mount=type=secret,id=GITHUB_TOKEN,required=true,uid=1000,gid=1000 \
+    github_token="$(cat /run/secrets/GITHUB_TOKEN)" && \
+    export GITHUB_TOKEN="$github_token" GH_TOKEN="$github_token" && \
+    eval "$(mise activate bash)" && \
     mise settings set ruby.compile false && \
     mise settings set idiomatic_version_file_enable_tools ruby && \
-    mise use -g -y node ruby neovim starship eza gum gh lazygit lazydocker opencode claude-code
+    mise use -g -y $(grep -vE '^[[:space:]]*(#|$)' /tmp/mise.packages)
 
 ENV PATH="/home/omaterm/.local/share/mise/shims:/home/omaterm/.local/bin:${PATH}"
 
-ENTRYPOINT ["/home/omaterm/.local/bin/omaterm-setup"]
+USER root
+ENTRYPOINT ["/home/omaterm/.local/bin/omaterm-entrypoint"]

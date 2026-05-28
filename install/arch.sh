@@ -1,13 +1,7 @@
 install_packages() {
-  local official_pkgs=(
-    base-devel git openssh sudo less inetutils whois
-    fzf zoxide tmux btop jq man-db
-    vim luarocks
-    clang llvm rust mise libyaml
-    docker docker-buildx docker-compose
-    tailscale
-    kitty-terminfo
-  )
+  local -a official_pkgs
+
+  mapfile -t official_pkgs < <(read_package_file "$INSTALLER_DIR/install/arch.packages")
 
   section "Installing Arch packages..."
   sudo pacman -Syu --needed --noconfirm "${official_pkgs[@]}"

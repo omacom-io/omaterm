@@ -1,23 +1,15 @@
 install_packages() {
+  local -a packages
+
+  mapfile -t packages < <(read_package_file "$INSTALLER_DIR/install/debian.packages")
+
   section "Updating system packages..."
   sudo apt-get update
   sudo apt-get upgrade -y
 
   section "Installing Debian packages..."
   sudo apt-get remove -y containerd.io 2>/dev/null || true
-  sudo apt-get install -y \
-    build-essential git openssh-server libssl-dev sudo less net-tools whois \
-    fzf zoxide tmux btop jq man-db \
-    vim luarocks \
-    clang llvm rustc libyaml-0-2 \
-    curl wget gpg \
-    docker.io docker-compose-v2 \
-    kitty-terminfo
-
-  # docker-buildx (skip if docker-buildx-plugin from Docker's repo is already installed)
-  if ! dpkg -l docker-buildx-plugin &>/dev/null; then
-    sudo apt-get install -y docker-buildx 2>/dev/null || true
-  fi
+  sudo apt-get install -y "${packages[@]}"
 
   # tailscale (not in Debian/Ubuntu repos)
   if ! command -v tailscale &>/dev/null; then

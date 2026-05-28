@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+COMMAND="${1:-}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DOCKER_CONFIG_DIR=""
+
+cleanup() {
+  if [ -n "$DOCKER_CONFIG_DIR" ]; then
+    rm -rf "$DOCKER_CONFIG_DIR"
+  fi
+}
+trap cleanup EXIT
+
+usage() {
+  cat >&2 <<'EOF'
+Usage: omaterm-build test|push
+
+omaterm-build test  builds omaterm:local and runs a disposable container
+omaterm-build push  builds and pushes ghcr.io/omacom-io/omaterm:latest
+EOF
+}
+
+if [ "$#" -gt 1 ]; then
+  usage
+  exit 1
+fi
+
+case "$COMMAND" in
+  test)
+    IMAGE="${OMATERM_IMAGE:-omaterm:local}"
+    ;;
+  push)
+    IMAGE="${OMATERM_IMAGE:-ghcr.io/omacom-io/omaterm:latest}"
+    ;;
+  -h|--help|help)
+    usage
+    exit 0
+    ;;
+  *)
+    usage
+    exit 1
+    ;;
+esac
+
+if ! GITHUB_TOKEN="$(gh auth token)" || [ -z "$GITHUB_TOKEN" ]; then
+  echo "Could not get a GitHub token from gh. Run: gh auth login" >&2
+  exit 1
+fi
+export GITHUB_TOKEN
+
+if [ "$COMMAND" = "push" ]; then
+  if ! GITHUB_USER="$(gh api user --jq .login)" || [ -z "$GITHUB_USER" ]; then
+    echo "Could not determine GitHub username from gh." >&2
+    exit 1
+  fi
+
+  DOCKER_CONFIG_DIR="$(mktemp -d)"
+  export DOCKER_CONFIG="$DOCKER_CONFIG_DIR"
+
+  if ! login_output="$(printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_USER" --password-stdin 2>&1)"; then
+    echo "$login_output" >&2
+    exit 1
+  fi
+fi
+
+DOCKER_BUILDKIT=1 docker build --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN -t "$IMAGE" "$REPO_ROOT"
+
+case "$COMMAND" in
+  push)
+    docker push "$IMAGE"
+    ;;
+  test)
+    docker run -it --rm "$IMAGE"
+    ;;
+esac

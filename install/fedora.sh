@@ -1,22 +1,19 @@
 install_packages() {
+  local -a packages
+
+  mapfile -t packages < <(read_package_file "$INSTALLER_DIR/install/fedora.packages")
+
   section "Updating system packages..."
   sudo dnf upgrade -y
 
   section "Installing Fedora packages..."
-  sudo dnf install -y @development-tools \
-    git openssh-server sudo less net-tools whois \
-    fzf zoxide tmux btop jq man-db \
-    vim luarocks \
-    clang llvm rust cargo libyaml \
-    curl wget \
-    tailscale \
-    kitty-terminfo
+  sudo dnf install -y "${packages[@]}"
 
   # Docker (not in Fedora repos, needs Docker's official repo)
   if ! command -v docker &>/dev/null; then
     section "Installing Docker..."
     sudo dnf config-manager addrepo --from-repofile=https://download.docker.com/linux/fedora/docker-ce.repo
-    sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
   fi
 
   # mise (not in Fedora repos)

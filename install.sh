@@ -40,166 +40,8 @@ as_root() {
   fi
 }
 
-prompt_confirm() {
-  local prompt="$1"
-  local default="${2:-y}"
-  local suffix reply
-
-  if [ "$default" = "y" ]; then
-    suffix="[Y/n]"
-  else
-    suffix="[y/N]"
-  fi
-
-  while true; do
-    printf "%s %s " "$prompt" "$suffix" > /dev/tty
-    IFS= read -r reply < /dev/tty || return 1
-    reply="${reply,,}"
-
-    case "$reply" in
-      "") [ "$default" = "y" ] && return 0 || return 1 ;;
-      y|yes) return 0 ;;
-      n|no) return 1 ;;
-      *) echo "Please answer yes or no." > /dev/tty ;;
-    esac
-  done
-}
-
-default_install_user() {
-  local users
-
-  if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
-    echo "$SUDO_USER"
-    return
-  fi
-
-  mapfile -t users < <(awk -F: '$3 >= 1000 && $3 < 60000 && $1 != "nobody" { print $1 }' /etc/passwd)
-  if [ "${#users[@]}" -eq 1 ]; then
-    echo "${users[0]}"
-  else
-    echo "omaterm"
-  fi
-}
-
-prompt_username() {
-  local default_user="$1"
-  local username
-
-  while true; do
-    printf "User to use/create [%s]: " "$default_user" > /dev/tty
-    IFS= read -r username < /dev/tty || return 1
-    username="${username:-$default_user}"
-
-    if [ "$username" = "root" ]; then
-      echo "Please choose a non-root user." > /dev/tty
-    elif [[ "$username" =~ ^[a-z_][a-z0-9_-]*[$]?$ ]]; then
-      echo "$username"
-      return 0
-    else
-      echo "Use a Linux username like 'omaterm' or 'alice'." > /dev/tty
-    fi
-  done
-}
-
-ensure_root_bootstrap_tools() {
-  local os_id="$1"
-
-  if command -v sudo &>/dev/null; then
-    return
-  fi
-
-  section "Installing sudo..."
-  case "$os_id" in
-    arch)
-      pacman -Syu --needed --noconfirm sudo
-      ;;
-    debian)
-      apt-get update
-      apt-get install -y sudo
-      ;;
-    fedora)
-      dnf install -y sudo
-      ;;
-  esac
-}
-
-admin_group_for_os() {
-  case "$1" in
-    debian) echo "sudo" ;;
-    arch|fedora) echo "wheel" ;;
-  esac
-}
-
-ensure_install_user() {
-  local username="$1"
-  local os_id="$2"
-  local admin_group
-
-  if getent passwd "$username" &>/dev/null; then
-    echo "✓ Using existing user: $username"
-  else
-    section "Creating user $username..."
-    useradd -m -s /bin/bash "$username"
-    echo "Set a password for $username. You'll use it for sudo during install."
-    passwd "$username" </dev/tty
-  fi
-
-  admin_group="$(admin_group_for_os "$os_id")"
-  getent group "$admin_group" &>/dev/null || groupadd "$admin_group"
-  usermod -aG "$admin_group" "$username"
-
-  mkdir -p /etc/sudoers.d
-  printf "%%%s ALL=(ALL:ALL) ALL\n" "$admin_group" > "/etc/sudoers.d/10-omaterm-$admin_group"
-  chmod 0440 "/etc/sudoers.d/10-omaterm-$admin_group"
-  echo "✓ Added $username to $admin_group"
-}
-
-maybe_reexec_as_non_root() {
-  local os_id="$1"
-  local installer_dir="$2"
-  local default_user target_user status
-
-  if [ "$EUID" -ne 0 ] || [ "${OMATERM_ALLOW_ROOT:-}" = "1" ]; then
-    return
-  fi
-
-  if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
-    echo "Running as root without an interactive TTY; continuing as root."
-    ensure_root_bootstrap_tools "$os_id"
-    return
-  fi
-
-  echo
-  echo "Omaterm is running as root. If we continue, user config will be installed under /root."
-  echo "It's usually better to install Omaterm as a normal sudo-capable user."
-
-  if ! prompt_confirm "Create/use a non-root user and run the install there instead?" "y"; then
-    echo "Continuing as root. Set OMATERM_ALLOW_ROOT=1 to skip this prompt."
-    ensure_root_bootstrap_tools "$os_id"
-    return
-  fi
-
-  default_user="$(default_install_user)"
-  target_user="$(prompt_username "$default_user")"
-
-  ensure_root_bootstrap_tools "$os_id"
-  ensure_install_user "$target_user" "$os_id"
-
-  section "Restarting installer as $target_user..."
-  chmod -R a+rX "$installer_dir"
-
-  if sudo -iu "$target_user" env OMATERM_REF="$OMATERM_REF" bash "$installer_dir/install.sh"; then
-    echo
-    echo "Omaterm installed for $target_user. You're back at the root shell."
-    echo "To start using Omaterm, either log out and log back in as $target_user, or run:"
-    echo "  su - $target_user"
-    exit 0
-  else
-    status=$?
-    echo
-    echo "Omaterm install failed for $target_user. You're back at the root shell."
-    exit "$status"
-  fi
+read_package_file() {
+  grep -vE '^[[:space:]]*(#|$)' "$1"
 }
 
 install_omadots() {
@@ -253,11 +95,15 @@ configure_shell() {
 }
 
 install_mise_tools() {
+  local -a mise_packages
+
   section "Installing mise tools..."
   eval "$(mise activate bash)" 2>/dev/null || true
 
+  mapfile -t mise_packages < <(read_package_file "$INSTALLER_DIR/install/mise.packages")
+
   mise settings set idiomatic_version_file_enable_tools ruby
-  mise use -g -y node ruby neovim starship eza gum gh lazygit lazydocker opencode claude-code codex gemini aqua:modem-dev/hunk
+  mise use -g -y "${mise_packages[@]}"
 
   export PATH="$HOME/.local/share/mise/shims:$PATH"
 }
@@ -379,6 +225,12 @@ run_installation() {
 show_banner
 section "Installing Omaterm..."
 
+if [ "$EUID" -eq 0 ]; then
+  echo "Error: Do not run the Omaterm installer as root."
+  echo "Log in as a normal sudo-capable user and run it again."
+  exit 1
+fi
+
 if ! OS_ID="$(detect_os)"; then
   echo "Error: Unsupported operating system"
   echo "Omaterm supports Arch Linux, Debian/Ubuntu, and Fedora"
@@ -401,7 +253,6 @@ trap 'rm -rf "$INSTALLER_DIR"' EXIT
 
 echo "Cloning Omaterm from $REPO ($OMATERM_REF)..."
 git clone --depth 1 --branch "$OMATERM_REF" "$REPO" "$INSTALLER_DIR"
-maybe_reexec_as_non_root "$OS_ID" "$INSTALLER_DIR"
 
 # OS detection and dispatch
 case "$OS_ID" in
