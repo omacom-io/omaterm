@@ -22,13 +22,4 @@ install_packages() {
 
   section "Installing Arch packages..."
   sudo pacman -Syu --needed --noconfirm "${official_pkgs[@]}"
-
-  if ! command -v yay &>/dev/null; then
-    section "Installing yay..."
-    local tmpdir
-    tmpdir="$(mktemp -d)"
-    git clone https://aur.archlinux.org/yay-bin.git "$tmpdir/yay"
-    (cd "$tmpdir/yay" && makepkg -si --noconfirm)
-    rm -rf "$tmpdir"
-  fi
 }
