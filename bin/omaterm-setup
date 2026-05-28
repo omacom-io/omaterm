@@ -9,75 +9,37 @@ if [ -f "$MARKER" ]; then
 fi
 
 setup_git_identity() {
-  local git_name git_email
-
   if git config --global user.name &>/dev/null && git config --global user.email &>/dev/null; then
     return
   fi
 
-  if ! gum confirm "Identify for Git?"; then
-    return
+  if gum confirm "Identify for Git?"; then
+    local git_name="$(git config --global user.name 2>/dev/null || true)"
+    local git_email="$(git config --global user.email 2>/dev/null || true)"
+
+    while [ -z "$git_name" ]; do
+      git_name="$(gum input --prompt "Git Name: ")"
+    done
+
+    while [ -z "$git_email" ]; do
+      git_email="$(gum input --prompt "Git Email: ")"
+    done
+
+    git config --global user.name "$git_name"
+    git config --global user.email "$git_email"
+    echo "✓ Git"
+    echo
   fi
-
-  git_name="$(git config --global user.name 2>/dev/null || true)"
-  git_email="$(git config --global user.email 2>/dev/null || true)"
-
-  while [ -z "$git_name" ]; do
-    git_name="$(gum input --prompt "Git Name: ")"
-  done
-
-  while [ -z "$git_email" ]; do
-    git_email="$(gum input --prompt "Git Email: ")"
-  done
-
-  git config --global user.name "$git_name"
-  git config --global user.email "$git_email"
-  echo "✓ Git identity"
 }
 
-install_1password_shell_helpers() {
-  local shell_rc="$HOME/.bashrc"
-
-  if grep -qF 'op-unlock()' "$shell_rc" 2>/dev/null; then
-    return
+setup_gh_authentication() {
+  if ! gh auth status &>/dev/null; then
+    if gum confirm "Authenticate with GitHub?"; then
+      gh auth login
+      echo "✓ GitHub"
+      echo
+    fi
   fi
-
-  cat >>"$shell_rc" <<'EOF'
-
-# Omaterm shell helpers
-op-unlock() {
-  eval "$(op signin)"
-}
-EOF
-  echo "✓ 1Password helper"
-}
-
-eval_1password() {
-  local signin_exports
-
-  if ! signin_exports="$("$@")"; then
-    return 1
-  fi
-
-  eval "$signin_exports"
-}
-
-setup_1password() {
-  command -v op &>/dev/null || return 0
-  op whoami &>/dev/null && return 0
-
-  echo
-  if ! gum confirm "Authenticate with 1Password?"; then
-    return 0
-  fi
-
-  if ! op account list --format json 2>/dev/null | jq -e 'length > 0' >/dev/null; then
-    eval_1password op account add --signin
-  else
-    eval_1password op signin
-  fi
-
-  echo "✓ 1Password"
 }
 
 start_tailscaled() {
@@ -100,7 +62,6 @@ setup_tailscale() {
   command -v tailscale &>/dev/null || return 0
   tailscale status &>/dev/null && return
 
-  echo
   if ! gum confirm "Connect to Tailscale?"; then
     return 0
   fi
@@ -112,6 +73,8 @@ setup_tailscale() {
   tailscale_args+=(--hostname="$tailnet_hostname")
 
   sudo tailscale up "${tailscale_args[@]}"
+  echo "✓ Tailscale"
+  echo
 }
 
 setup_tailnet_hostname() {
@@ -196,7 +159,27 @@ setup_ssh_public_key() {
     sudo systemctl restart ssh.service
   fi
 
-  echo "SSH configured for key-based authentication only."
+  echo "✓ SSH"
+  echo
+}
+
+setup_1password() {
+  command -v op &>/dev/null || return 0
+  op whoami &>/dev/null && return 0
+
+  echo
+  if ! gum confirm "Authenticate with 1Password?"; then
+    return 0
+  fi
+
+  if ! op account list --format json 2>/dev/null | jq -e 'length > 0' >/dev/null; then
+    eval "$(op account add --signin)"
+  else
+    eval "$(op signin)"
+  fi
+
+  echo "✓ 1Password"
+  echo
 }
 
 clear
@@ -216,26 +199,10 @@ echo
 
 # Git identity
 setup_git_identity
-
-# Shell helpers
-install_1password_shell_helpers
-
-# GitHub CLI
-if ! gh auth status &>/dev/null; then
-  echo
-  if gum confirm "Authenticate with GitHub?"; then
-    gh auth login
-  fi
-fi
-
-# 1Password CLI
-setup_1password
-
-# SSH public key
-setup_ssh_public_key
-
-# Tailscale
+setup_gh_authentication
 setup_tailscale
+setup_ssh_public_key
+setup_1password
 
 # Proxmox serial console
 setup_proxmox_serial_console
