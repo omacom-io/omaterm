@@ -177,6 +177,6 @@ run_setup_section "SSH key setup" setup_ssh_public_key
 run_setup_section "1Password authentication" setup_1password
 
 echo
-gum spin --spinner "globe" --title "Setup done! Press any key to tmux..." -- bash -c 'read -n 1 -s'
+gum spin --spinner "globe" --title "Setup done! Press any key to tmux..." -- bash -c 'read -n 1 -s </dev/tty'
 
 touch "$MARKER"
