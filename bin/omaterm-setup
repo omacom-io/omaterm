@@ -7,6 +7,56 @@ if [ -f "$MARKER" ]; then
   exec bash -l "$@"
 fi
 
+is_docker() {
+  [ "${OMATERM_DOCKER:-}" = "1" ] || [ -f /.dockerenv ]
+}
+
+setup_sudo_password() {
+  local username
+  username="${USER:-$(id -un)}"
+
+  if ! is_docker || ! sudo -n grep -q NOPASSWD /etc/sudoers.d/omaterm 2>/dev/null; then
+    return
+  fi
+
+  echo "Set a sudo password for $username."
+  until sudo passwd "$username"; do
+    echo "Password setup failed. Try again."
+  done
+
+  printf "%s ALL=(ALL) ALL\n" "$username" | sudo sh -c 'cat > /etc/sudoers.d/omaterm && chmod 0440 /etc/sudoers.d/omaterm'
+  sudo -k
+
+  echo
+}
+
+setup_git_identity() {
+  local git_name git_email
+
+  if git config --global user.name &>/dev/null && git config --global user.email &>/dev/null; then
+    return
+  fi
+
+  if ! gum confirm "Identify for Git?"; then
+    return
+  fi
+
+  git_name="$(git config --global user.name 2>/dev/null || true)"
+  git_email="$(git config --global user.email 2>/dev/null || true)"
+
+  while [ -z "$git_name" ]; do
+    git_name="$(gum input --prompt "Git Name: ")"
+  done
+
+  while [ -z "$git_email" ]; do
+    git_email="$(gum input --prompt "Git Email: ")"
+  done
+
+  git config --global user.name "$git_name"
+  git config --global user.email "$git_email"
+  echo "✓ Git identity"
+}
+
 echo
 echo " ▄██████▄    ▄▄▄▄███▄▄▄▄      ▄████████     ███        ▄████████    ▄████████   ▄▄▄▄███▄▄▄▄
 ███    ███ ▄██▀▀▀███▀▀▀██▄   ███    ███ ▀█████████▄   ███    ███   ███    ███ ▄██▀▀▀███▀▀▀██▄
@@ -21,13 +71,10 @@ echo
 echo "Welcome to Omaterm! Let's get you set up."
 echo
 
+setup_sudo_password
+
 # Git identity
-if ! git config --global user.name &>/dev/null || ! git config --global user.email &>/dev/null; then
-  if gum confirm "Identify for Git?"; then
-    source ~/.config/shell/functions
-    git-id
-  fi
-fi
+setup_git_identity
 
 # GitHub CLI
 if ! gh auth status &>/dev/null; then

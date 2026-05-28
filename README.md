@@ -22,7 +22,9 @@ curl -fsSL https://omaterm.org/install | bash
 docker run -it --name omaterm ghcr.io/omacom-io/omaterm
 ```
 
-If you need omaterm to be able to run it's own Docker containres, you can give it access to the host docker engine:
+The first run starts an interactive setup, including a prompt to set the `omaterm` sudo password.
+
+If you need omaterm to be able to run its own Docker containers, you can give it access to the host Docker engine:
 
 ```bash
 docker run -it --name omaterm -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/omacom-io/omaterm

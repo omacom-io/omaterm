@@ -15,11 +15,13 @@ RUN pacman -Syu --needed --noconfirm \
 
 # Create a non-root user
 RUN useradd -m -s /bin/bash omaterm && \
-    echo "omaterm ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/omaterm
+    echo "omaterm ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/omaterm && \
+    chmod 0440 /etc/sudoers.d/omaterm
 
 USER omaterm
 WORKDIR /home/omaterm
 ENV SHELL=/bin/bash
+ENV OMATERM_DOCKER=1
 
 # Install yay
 RUN git clone https://aur.archlinux.org/yay-bin.git /tmp/yay && \
@@ -50,5 +52,4 @@ RUN eval "$(mise activate bash)" && \
 
 ENV PATH="/home/omaterm/.local/share/mise/shims:/home/omaterm/.local/bin:${PATH}"
 
-ENTRYPOINT ["/bin/bash"]
-CMD ["-l"]
+ENTRYPOINT ["/home/omaterm/.local/bin/omaterm-setup"]
