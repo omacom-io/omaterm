@@ -23,6 +23,8 @@ luarocks
 clang
 llvm
 rust
+nodejs
+npm
 mise
 libyaml
 docker
