@@ -16,7 +16,7 @@ usage() {
   cat >&2 <<'EOF'
 Usage: omaterm-build test|push
 
-omaterm-build test  builds omaterm:local and runs a disposable container with host Docker access
+omaterm-build test  builds omaterm:local and runs a disposable container with Docker-in-Docker
 omaterm-build push  builds and pushes ghcr.io/omacom-io/omaterm:latest
 EOF
 }
@@ -57,5 +57,5 @@ docker build --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN -t "$IMAGE" "$REPO_ROOT"
 
 case "$COMMAND" in
   push) docker push "$IMAGE" ;;
-  test) docker run -it --rm --mount type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock "$IMAGE" ;;
+  test) docker run -it --rm --privileged --cgroupns=host "$IMAGE" ;;
 esac

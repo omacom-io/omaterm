@@ -3,6 +3,8 @@ set -euo pipefail
 
 TAILSCALE_STATE="/var/lib/tailscale/tailscaled.state"
 TAILSCALE_SOCKET="/var/run/tailscale/tailscaled.sock"
+DIND_SOCKET="/var/run/omaterm-docker.sock"
+DIND_HOST="unix://$DIND_SOCKET"
 
 tailscaled_running() {
   local comm
@@ -31,11 +33,11 @@ start_tailscaled_if_configured() {
 }
 
 setup_docker_socket_access() {
-  local docker_gid
+  local docker_gid docker_socket="${1:-/var/run/docker.sock}"
 
-  [ -S /var/run/docker.sock ] || return 0
+  [ -S "$docker_socket" ] || return 0
 
-  docker_gid="$(stat -c "%g" /var/run/docker.sock)"
+  docker_gid="$(stat -c "%g" "$docker_socket")"
 
   if getent group docker &>/dev/null; then
     groupmod -o -g "$docker_gid" docker
@@ -46,8 +48,31 @@ setup_docker_socket_access() {
   usermod -aG docker omaterm
 }
 
+start_dind() {
+  mkdir -p /var/lib/docker "$(dirname "$DIND_SOCKET")"
+
+  if ! docker --host "$DIND_HOST" info &>/dev/null; then
+    rm -f "$DIND_SOCKET"
+    dockerd --host "$DIND_HOST" --storage-driver=vfs >/var/log/dockerd.log 2>&1 &
+  fi
+
+  for _ in {1..60}; do
+    docker --host "$DIND_HOST" info &>/dev/null && return 0
+    sleep 1
+  done
+
+  echo "Error: Docker-in-Docker daemon did not start." >&2
+  tail -50 /var/log/dockerd.log >&2 || true
+  exit 1
+}
+
 /home/omaterm/.local/bin/omaterm-setup-sudopw
-setup_docker_socket_access
+if [ "${OMATERM_DOCKER_HOST:-}" = "1" ]; then
+  setup_docker_socket_access /var/run/docker.sock
+else
+  start_dind
+  setup_docker_socket_access "$DIND_SOCKET"
+fi
 start_tailscaled_if_configured
 
 OMATERM_ENV=(
@@ -59,6 +84,12 @@ OMATERM_ENV=(
   OMATERM_DOCKER=1
   PATH="/home/omaterm/.local/share/mise/shims:/home/omaterm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin"
 )
+
+if [ "${OMATERM_DOCKER_HOST:-}" = "1" ]; then
+  OMATERM_ENV+=(OMATERM_DOCKER_HOST=1)
+else
+  OMATERM_ENV+=(DOCKER_HOST="$DIND_HOST")
+fi
 
 run_as_omaterm() {
   runuser -u omaterm -- env "${OMATERM_ENV[@]}" "$@"
