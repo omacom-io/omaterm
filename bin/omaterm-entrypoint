@@ -46,7 +46,7 @@ setup_docker_socket_access() {
   usermod -aG docker omaterm
 }
 
-/home/omaterm/.local/bin/omaterm-setup-docker
+/home/omaterm/.local/bin/omaterm-setup-sudopw
 setup_docker_socket_access
 start_tailscaled_if_configured
 
