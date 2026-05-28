@@ -118,6 +118,12 @@ setup_docker_group() {
   fi
 }
 
+enable_docker() {
+  sudo systemctl enable docker.service
+  sudo systemctl start --no-block docker.service
+  echo "✓ Docker"
+}
+
 enable_ssh() {
   local ssh_service
 

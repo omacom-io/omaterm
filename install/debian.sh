@@ -24,9 +24,3 @@ install_packages() {
     export PATH="$HOME/.local/bin:$PATH"
   fi
 }
-
-enable_docker() {
-  sudo systemctl enable docker.service
-  sudo systemctl start --no-block docker.service
-  echo "✓ Docker"
-}
