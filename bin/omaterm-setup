@@ -103,7 +103,7 @@ setup_ssh_public_key() {
       echo "SSH key added to authorized_keys."
     fi
 
-    if grep -q "^PasswordAuthentication no" /etc/ssh/sshd_config 2>/dev/null; then
+    if sudo sshd -T 2>/dev/null | grep -q '^passwordauthentication no'; then
       return
     fi
 
@@ -111,8 +111,24 @@ setup_ssh_public_key() {
       return
     fi
 
-    sudo sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config || return 1
-    sudo sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config || return 1
+    # Write a drop-in rather than editing sshd_config directly: distros such as
+    # Ubuntu cloud images Include /etc/ssh/sshd_config.d/*.conf and ship a
+    # 50-cloud-init.conf with "PasswordAuthentication yes" that would otherwise
+    # override the main config and silently keep password login enabled.
+    if [ -d /etc/ssh/sshd_config.d ]; then
+      printf 'PasswordAuthentication no\nKbdInteractiveAuthentication no\nPubkeyAuthentication yes\n' |
+        sudo tee /etc/ssh/sshd_config.d/99-omaterm.conf >/dev/null || return 1
+    else
+      sudo sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config || return 1
+      sudo sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config || return 1
+    fi
+
+    # Confirm the effective config actually disabled password auth before reporting success.
+    if ! sudo sshd -T 2>/dev/null | grep -q '^passwordauthentication no'; then
+      echo "Error: password authentication is still enabled in the effective sshd config." >&2
+      echo "Check for overrides in /etc/ssh/sshd_config and /etc/ssh/sshd_config.d/*.conf." >&2
+      return 1
+    fi
 
     if systemctl cat sshd.service &>/dev/null; then
       sudo systemctl restart sshd.service || return 1
