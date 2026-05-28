@@ -5,64 +5,6 @@ TAILSCALE_STATE="/var/lib/tailscale/tailscaled.state"
 TAILSCALE_SOCKET="/var/run/tailscale/tailscaled.sock"
 OMATERM_HOSTNAME_FILE="/etc/omaterm-hostname"
 
-setup_sudo_password() {
-  if ! grep -q NOPASSWD /etc/sudoers.d/omaterm 2>/dev/null; then
-    return
-  fi
-
-  if [ ! -t 0 ]; then
-    echo "Error: First-run Docker setup needs an interactive terminal to set the omaterm sudo password."
-    echo "Run with: docker run -it --name omaterm ghcr.io/omacom-io/omaterm"
-    exit 1
-  fi
-
-  echo "Set a sudo password for omaterm."
-  until passwd omaterm; do
-    echo "Password setup failed. Try again."
-  done
-
-  printf "omaterm ALL=(ALL) ALL\n" > /etc/sudoers.d/omaterm
-  chmod 0440 /etc/sudoers.d/omaterm
-  echo
-}
-
-setup_hostname() {
-  local current_name hostname
-
-  if [ -s "$OMATERM_HOSTNAME_FILE" ]; then
-    return
-  fi
-
-  if [ ! -t 0 ]; then
-    echo "Error: First-run Docker setup needs an interactive terminal to set the omaterm hostname."
-    echo "Run with: docker run -it --name omaterm ghcr.io/omacom-io/omaterm"
-    exit 1
-  fi
-
-  current_name="$(hostname)"
-  echo "Set a hostname. This is used for Tailscale and your shell prompt."
-
-  while true; do
-    hostname="$(runuser -u omaterm -- env \
-      HOME=/home/omaterm \
-      USER=omaterm \
-      LOGNAME=omaterm \
-      TERM="${TERM:-xterm-256color}" \
-      PATH="/home/omaterm/.local/share/mise/shims:/home/omaterm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin" \
-      gum input --prompt "Hostname: " --value "$current_name")"
-    hostname="${hostname:-$current_name}"
-
-    if [[ "$hostname" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$ ]]; then
-      printf "%s\n" "$hostname" > "$OMATERM_HOSTNAME_FILE"
-      hostname "$hostname" 2>/dev/null || true
-      echo
-      return
-    fi
-
-    echo "Use letters, numbers, and hyphens only, starting with a letter or number."
-  done
-}
-
 tailscaled_running() {
   local comm
 
@@ -105,8 +47,7 @@ setup_docker_socket_access() {
   usermod -aG docker omaterm
 }
 
-setup_sudo_password
-setup_hostname
+/home/omaterm/.local/bin/omaterm-setup-docker
 setup_docker_socket_access
 start_tailscaled_if_configured
 
