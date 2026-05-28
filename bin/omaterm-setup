@@ -82,7 +82,7 @@ setup_tailscale() {
 setup_ssh_public_key() {
   local ssh_key
 
-  if gum confirm "Add SSH public key for remote access?"; then
+  if gum confirm "Replace password with SSH public key for remote access?"; then
     mkdir -p "$HOME/.ssh"
     chmod 700 "$HOME/.ssh"
 
