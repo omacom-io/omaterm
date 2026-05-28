@@ -60,6 +60,7 @@ setup_tailscale() {
     current_name="${current_name:-$(hostname)}"
 
     while true; do
+      echo
       local tailnet_hostname="$(gum input --prompt "Tailnet hostname: " --value "$current_name")"
       tailnet_hostname="${tailnet_hostname:-$current_name}"
 
@@ -73,6 +74,8 @@ setup_tailscale() {
 
     local tailscale_args=(--ssh --accept-routes --hostname="$tailnet_hostname")
 
+    echo
+    echo "Bringing up Tailscale..."
     sudo tailscale up "${tailscale_args[@]}"
     echo "✓ Tailscale"
     echo
