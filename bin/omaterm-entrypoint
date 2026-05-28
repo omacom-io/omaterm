@@ -22,10 +22,15 @@ start_tailscaled_if_configured() {
 
   mkdir -p "$(dirname "$TAILSCALE_SOCKET")" "$(dirname "$TAILSCALE_STATE")"
 
+  local tun_args=(--tun=userspace-networking)
+  if [ -w /dev/net/tun ]; then
+    tun_args=()
+  fi
+
   if ! tailscaled_running; then
     rm -f "$TAILSCALE_SOCKET"
     tailscaled \
-      --tun=userspace-networking \
+      "${tun_args[@]}" \
       --state="$TAILSCALE_STATE" \
       --socket="$TAILSCALE_SOCKET" \
       >/var/log/tailscaled.log 2>&1 &
@@ -67,12 +72,8 @@ start_dind() {
 }
 
 /home/omaterm/.local/bin/omaterm-setup-sudopw
-if [ "${OMATERM_DOCKER_HOST:-}" = "1" ]; then
-  setup_docker_socket_access /var/run/docker.sock
-else
-  start_dind
-  setup_docker_socket_access "$DIND_SOCKET"
-fi
+start_dind
+setup_docker_socket_access "$DIND_SOCKET"
 start_tailscaled_if_configured
 
 OMATERM_ENV=(
@@ -82,14 +83,9 @@ OMATERM_ENV=(
   SHELL=/bin/bash
   TERM="${TERM:-xterm-256color}"
   OMATERM_DOCKER=1
+  DOCKER_HOST="$DIND_HOST"
   PATH="/home/omaterm/.local/share/mise/shims:/home/omaterm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin"
 )
-
-if [ "${OMATERM_DOCKER_HOST:-}" = "1" ]; then
-  OMATERM_ENV+=(OMATERM_DOCKER_HOST=1)
-else
-  OMATERM_ENV+=(DOCKER_HOST="$DIND_HOST")
-fi
 
 run_as_omaterm() {
   runuser -u omaterm -- env "${OMATERM_ENV[@]}" "$@"
