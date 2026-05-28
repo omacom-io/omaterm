@@ -37,15 +37,14 @@ setup_git_identity() {
 install_1password_shell_helpers() {
   local shell_rc="$HOME/.bashrc"
 
-  if grep -qF 'op-signin()' "$shell_rc" 2>/dev/null; then
+  if grep -qF 'op-unlock()' "$shell_rc" 2>/dev/null; then
     return
   fi
 
   cat >>"$shell_rc" <<'EOF'
 
 # Omaterm shell helpers
-op-signin() {
-  command -v op >/dev/null || return 127
+op-unlock() {
   eval "$(op signin)"
 }
 EOF
