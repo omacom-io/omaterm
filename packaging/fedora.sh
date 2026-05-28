@@ -1,7 +1,7 @@
 install_packages() {
   local -a packages
 
-  mapfile -t packages < <(read_package_file "$INSTALLER_DIR/install/fedora.packages")
+  mapfile -t packages < <(read_package_file "$INSTALLER_DIR/packaging/fedora.packages")
 
   section "Updating system packages..."
   sudo dnf upgrade -y

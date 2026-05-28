@@ -1,7 +1,7 @@
 install_packages() {
   local -a packages
 
-  mapfile -t packages < <(read_package_file "$INSTALLER_DIR/install/debian.packages")
+  mapfile -t packages < <(read_package_file "$INSTALLER_DIR/packaging/debian.packages")
 
   section "Updating system packages..."
   sudo apt-get update

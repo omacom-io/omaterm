@@ -4,7 +4,7 @@ FROM archlinux:latest
 # Use all cores for compilation
 RUN echo "MAKEFLAGS=\"-j$(nproc)\"" >> /etc/makepkg.conf
 
-COPY install/arch.packages /tmp/arch.packages
+COPY packaging/arch.packages /tmp/arch.packages
 
 # Update system and install official packages
 RUN pacman -Syu --needed --noconfirm $(grep -vE '^[[:space:]]*(#|$)' /tmp/arch.packages) && \
@@ -32,7 +32,7 @@ RUN curl -fsSL https://raw.githubusercontent.com/omacom-io/omadots/refs/heads/ma
 # Copy configs and bins
 COPY --chown=omaterm:omaterm config/ /home/omaterm/.config/
 COPY --chown=omaterm:omaterm bin/ /home/omaterm/.local/bin/
-COPY --chown=omaterm:omaterm install/mise.packages /tmp/mise.packages
+COPY --chown=omaterm:omaterm packaging/mise.packages /tmp/mise.packages
 RUN chmod +x /home/omaterm/.local/bin/*
 
 # Auto-start tmux in .bashrc

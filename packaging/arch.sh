@@ -1,7 +1,7 @@
 install_packages() {
   local -a official_pkgs
 
-  mapfile -t official_pkgs < <(read_package_file "$INSTALLER_DIR/install/arch.packages")
+  mapfile -t official_pkgs < <(read_package_file "$INSTALLER_DIR/packaging/arch.packages")
 
   section "Installing Arch packages..."
   sudo pacman -Syu --needed --noconfirm "${official_pkgs[@]}"

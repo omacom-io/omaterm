@@ -137,7 +137,7 @@ install_mise_tools() {
   section "Installing mise tools..."
   eval "$(mise activate bash)" 2>/dev/null || true
 
-  mapfile -t mise_packages < <(read_package_file "$INSTALLER_DIR/install/mise.packages")
+  mapfile -t mise_packages < <(read_package_file "$INSTALLER_DIR/packaging/mise.packages")
 
   mise settings set idiomatic_version_file_enable_tools ruby
   mise use -g -y "${mise_packages[@]}"
@@ -333,9 +333,9 @@ git clone --depth 1 --branch "$OMATERM_REF" "$REPO" "$INSTALLER_DIR"
 
 # OS detection and dispatch
 case "$OS_ID" in
-  arch) source "$INSTALLER_DIR/install/arch.sh" ;;
-  debian) source "$INSTALLER_DIR/install/debian.sh" ;;
-  fedora) source "$INSTALLER_DIR/install/fedora.sh" ;;
+  arch) source "$INSTALLER_DIR/packaging/arch.sh" ;;
+  debian) source "$INSTALLER_DIR/packaging/debian.sh" ;;
+  fedora) source "$INSTALLER_DIR/packaging/fedora.sh" ;;
 esac
 
 run_installation
