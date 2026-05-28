@@ -3,8 +3,9 @@ FROM archlinux:latest
 
 COPY packaging/arch.packages /tmp/arch.packages
 
-# Update system and install official packages
-RUN pacman -Syu --needed --noconfirm $(grep -vE '^[[:space:]]*(#|$)' /tmp/arch.packages) && \
+# Update system and install official/Omarchy packages
+RUN printf '\n[omarchy]\nSigLevel = Optional TrustAll\nServer = https://pkgs.omarchy.org/stable/$arch\n' >> /etc/pacman.conf && \
+    pacman -Syu --needed --noconfirm $(grep -vE '^[[:space:]]*(#|$)' /tmp/arch.packages) && \
     pacman -Scc --noconfirm
 
 # Create a non-root user

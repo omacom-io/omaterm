@@ -12,6 +12,12 @@ btop
 jq
 man-db
 vim
+neovim
+starship
+gum
+gh
+1password-cli
+lazygit
 luarocks
 clang
 llvm

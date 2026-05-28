@@ -13,6 +13,11 @@ btop
 jq
 man-db
 vim
+neovim
+eza
+gum
+gh
+1password-cli
 luarocks
 clang
 llvm

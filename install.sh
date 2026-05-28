@@ -72,20 +72,6 @@ install_omadots() {
   curl -fsSL https://raw.githubusercontent.com/omacom-io/omadots/refs/heads/master/install.sh | bash
 }
 
-install_mise_tools() {
-  local -a mise_packages
-
-  section "Installing mise tools..."
-  eval "$(mise activate bash)" 2>/dev/null || true
-
-  mapfile -t mise_packages < <(read_package_file "$INSTALLER_DIR/packaging/mise.packages")
-
-  mise settings set idiomatic_version_file_enable_tools ruby
-  mise use -g -y "${mise_packages[@]}"
-
-  export PATH="$HOME/.local/share/mise/shims:$PATH"
-}
-
 install_configs() {
   section "Installing configs..."
   mkdir -p "$HOME/.config"
@@ -182,9 +168,6 @@ run_installation() {
   # Configs and bins
   install_configs
   install_bins
-
-  # Mise tooling
-  install_mise_tools
 
   # OS-specific service enabling
   enable_services

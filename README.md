@@ -44,11 +44,10 @@ The named container persists its filesystem across starts, including home direct
 - **Editors**: Neovim (LazyVim)
 - **Agents**: opencode, claude-code, codex, gemini
 - **Dev tools**: mise, docker, GitHub CLI (`gh`), 1Password CLI (`op`), lazygit, lazydocker, hunk
-- **Dev envs**: Ruby, Node
 - **Networking**: SSH, tailscale
 - **Git**: Interactive config for user name/email, helpful aliases
 
-All the dev tools and agent harnesses are managed through mise. You update them using `mise up`. This is also how you should be installing additional tools and dev environments. For example, `mise use -g go` will make the latest go available.
+Core CLI tools are installed through the OS package manager where possible. Docker builds install the bundled mise tools using the build `GITHUB_TOKEN`; non-Docker installs can add agent tools after setup with commands like `mise use -g codex`.
 
 ## Interactive prompts
 
