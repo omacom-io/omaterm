@@ -33,153 +33,111 @@ setup_git_identity() {
 }
 
 setup_gh_authentication() {
-  if ! gh auth status &>/dev/null; then
-    if gum confirm "Authenticate with GitHub?"; then
-      gh auth login
-      echo "✓ GitHub"
-      echo
-    fi
+  if ! gh auth status &>/dev/null && gum confirm "Authenticate with GitHub?"; then
+    gh auth login
+    echo "✓ GitHub"
+    echo
   fi
-}
-
-start_tailscaled() {
-  if [ "${OMATERM_DOCKER:-}" = "1" ] || [ -f /.dockerenv ]; then
-    sudo mkdir -p /var/lib/tailscale /var/run/tailscale
-    sudo rm -f /var/run/tailscale/tailscaled.sock
-    sudo sh -c 'tailscaled --tun=userspace-networking --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock >/tmp/tailscaled.log 2>&1 &'
-  elif systemctl cat tailscaled.service &>/dev/null; then
-    sudo systemctl enable --now tailscaled.service
-  else
-    sudo sh -c 'tailscaled >/tmp/tailscaled.log 2>&1 &'
-  fi
-
-  sleep 2
 }
 
 setup_tailscale() {
-  local tailscale_args tailnet_hostname
+  local current_name tailnet_hostname tailscale_args
 
-  command -v tailscale &>/dev/null || return 0
   tailscale status &>/dev/null && return
 
-  if ! gum confirm "Connect to Tailscale?"; then
-    return 0
-  fi
-
-  start_tailscaled
-
-  tailscale_args=(--ssh --accept-routes)
-  tailnet_hostname="$(setup_tailnet_hostname)"
-  tailscale_args+=(--hostname="$tailnet_hostname")
-
-  sudo tailscale up "${tailscale_args[@]}"
-  echo "✓ Tailscale"
-  echo
-}
-
-setup_tailnet_hostname() {
-  local current_name tailnet_hostname
-
-  current_name="$(cat "$TAILSCALE_HOSTNAME_FILE" 2>/dev/null || true)"
-  current_name="${current_name:-$(hostname)}"
-
-  while true; do
-    tailnet_hostname="$(gum input --prompt "Tailnet hostname: " --value "$current_name")"
-    tailnet_hostname="${tailnet_hostname:-$current_name}"
-
-    if [[ "$tailnet_hostname" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$ ]]; then
-      printf "%s\n" "$tailnet_hostname" | sudo tee "$TAILSCALE_HOSTNAME_FILE" >/dev/null
-      printf "%s\n" "$tailnet_hostname"
-      return
+  if gum confirm "Connect to Tailscale?"; then
+    if [ "${OMATERM_DOCKER:-}" = "1" ] || [ -f /.dockerenv ]; then
+      sudo mkdir -p /var/lib/tailscale /var/run/tailscale
+      sudo rm -f /var/run/tailscale/tailscaled.sock
+      sudo sh -c 'tailscaled --tun=userspace-networking --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock >/tmp/tailscaled.log 2>&1 &'
+    elif systemctl cat tailscaled.service &>/dev/null; then
+      sudo systemctl enable --now tailscaled.service
+    else
+      sudo sh -c 'tailscaled >/tmp/tailscaled.log 2>&1 &'
     fi
 
-    echo "Use letters, numbers, and hyphens only, starting with a letter or number."
-  done
-}
+    sleep 2
 
-setup_proxmox_serial_console() {
-  if ! grep -qi proxmox /sys/class/dmi/id/product_name 2>/dev/null || [ ! -e /dev/ttyS0 ]; then
-    return
+    current_name="$(cat "$TAILSCALE_HOSTNAME_FILE" 2>/dev/null || true)"
+    current_name="${current_name:-$(hostname)}"
+
+    while true; do
+      tailnet_hostname="$(gum input --prompt "Tailnet hostname: " --value "$current_name")"
+      tailnet_hostname="${tailnet_hostname:-$current_name}"
+
+      if [[ "$tailnet_hostname" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$ ]]; then
+        printf "%s\n" "$tailnet_hostname" | sudo tee "$TAILSCALE_HOSTNAME_FILE" >/dev/null
+        break
+      fi
+
+      echo "Use letters, numbers, and hyphens only, starting with a letter or number."
+    done
+
+    tailscale_args=(--ssh --accept-routes --hostname="$tailnet_hostname")
+
+    sudo tailscale up "${tailscale_args[@]}"
+    echo "✓ Tailscale"
+    echo
   fi
-
-  if systemctl is-enabled serial-getty@ttyS0.service &>/dev/null; then
-    return
-  fi
-
-  echo
-  if ! gum confirm "Proxmox VM detected with serial port. Enable serial console?"; then
-    return
-  fi
-
-  sudo systemctl enable serial-getty@ttyS0.service
-  sudo systemctl start serial-getty@ttyS0.service
-  echo "✓ Serial console enabled on ttyS0"
 }
 
 setup_ssh_public_key() {
   local ssh_key
 
-  echo
-  if ! gum confirm "Add SSH public key for remote access?"; then
-    return
+  if gum confirm "Add SSH public key for remote access?"; then
+    mkdir -p "$HOME/.ssh"
+    chmod 700 "$HOME/.ssh"
+
+    ssh_key="$(gum input --placeholder "ssh-ed25519 AAAAC3..." --prompt "SSH key: ")"
+    if [ -z "$ssh_key" ]; then
+      return
+    fi
+
+    touch "$HOME/.ssh/authorized_keys"
+    chmod 600 "$HOME/.ssh/authorized_keys"
+
+    if grep -qxF "$ssh_key" "$HOME/.ssh/authorized_keys"; then
+      echo "SSH key already present in authorized_keys."
+    else
+      echo "$ssh_key" >>"$HOME/.ssh/authorized_keys"
+      echo "SSH key added to authorized_keys."
+    fi
+
+    if grep -q "^PasswordAuthentication no" /etc/ssh/sshd_config 2>/dev/null; then
+      return
+    fi
+
+    if ! gum confirm "Disable password authentication for SSH (key-based auth only)?"; then
+      return
+    fi
+
+    sudo sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+    sudo sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+
+    if systemctl cat sshd.service &>/dev/null; then
+      sudo systemctl restart sshd.service
+    elif systemctl cat ssh.service &>/dev/null; then
+      sudo systemctl restart ssh.service
+    fi
+
+    echo "✓ SSH"
+    echo
   fi
-
-  mkdir -p "$HOME/.ssh"
-  chmod 700 "$HOME/.ssh"
-
-  ssh_key="$(gum input --placeholder "ssh-ed25519 AAAAC3..." --prompt "SSH key: ")"
-  if [ -z "$ssh_key" ]; then
-    return
-  fi
-
-  touch "$HOME/.ssh/authorized_keys"
-  chmod 600 "$HOME/.ssh/authorized_keys"
-
-  if grep -qxF "$ssh_key" "$HOME/.ssh/authorized_keys"; then
-    echo "SSH key already present in authorized_keys."
-  else
-    echo "$ssh_key" >>"$HOME/.ssh/authorized_keys"
-    echo "SSH key added to authorized_keys."
-  fi
-
-  if grep -q "^PasswordAuthentication no" /etc/ssh/sshd_config 2>/dev/null; then
-    return
-  fi
-
-  if ! gum confirm "Disable password authentication for SSH (key-based auth only)?"; then
-    return
-  fi
-
-  sudo sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
-  sudo sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
-
-  if systemctl cat sshd.service &>/dev/null; then
-    sudo systemctl restart sshd.service
-  elif systemctl cat ssh.service &>/dev/null; then
-    sudo systemctl restart ssh.service
-  fi
-
-  echo "✓ SSH"
-  echo
 }
 
 setup_1password() {
-  command -v op &>/dev/null || return 0
   op whoami &>/dev/null && return 0
 
-  echo
-  if ! gum confirm "Authenticate with 1Password?"; then
-    return 0
-  fi
+  if gum confirm "Authenticate with 1Password?"; then
+    if ! op account list --format json 2>/dev/null | jq -e 'length > 0' >/dev/null; then
+      eval "$(op account add --signin)"
+    else
+      eval "$(op signin)"
+    fi
 
-  if ! op account list --format json 2>/dev/null | jq -e 'length > 0' >/dev/null; then
-    eval "$(op account add --signin)"
-  else
-    eval "$(op signin)"
+    echo "✓ 1Password"
+    echo
   fi
-
-  echo "✓ 1Password"
-  echo
 }
 
 clear
@@ -203,9 +161,6 @@ setup_gh_authentication
 setup_tailscale
 setup_ssh_public_key
 setup_1password
-
-# Proxmox serial console
-setup_proxmox_serial_console
 
 echo
 echo "✓ Setup complete!"
