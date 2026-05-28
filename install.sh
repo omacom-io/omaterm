@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+DOCKER_GROUP_REFRESH=0
+
 # Common functions for Omaterm installation
 show_banner() {
   clear
@@ -99,6 +101,10 @@ enable_docker() {
 
   username="${USER:-$(id -un)}"
 
+  if ! id -nG | grep -qw docker; then
+    DOCKER_GROUP_REFRESH=1
+  fi
+
   if ! id -nG "$username" | grep -qw docker; then
     if command -v usermod &>/dev/null; then
       sudo usermod -aG docker "$username"
@@ -133,14 +139,15 @@ enable_services() {
   enable_ssh
 }
 
-finish() {
-  section "Finished!"
-  echo "Now logout and back in for everything to take effect"
-}
-
 run_first_setup() {
   section "First-run setup..."
   "$HOME/.local/bin/omaterm-setup"
+
+  if [ "$DOCKER_GROUP_REFRESH" = "1" ] && command -v sg &>/dev/null; then
+    exec sg docker -c 'exec bash -l'
+  else
+    exec bash -l
+  fi
 }
 
 run_installation() {
@@ -162,9 +169,6 @@ run_installation() {
 
   # First-run setup
   run_first_setup
-
-  # Done!
-  finish
 }
 
 # Getting started
