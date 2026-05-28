@@ -7,10 +7,6 @@ if [ -f "$MARKER" ]; then
   exec bash -l "$@"
 fi
 
-is_docker() {
-  [ "${OMATERM_DOCKER:-}" = "1" ] || [ -f /.dockerenv ]
-}
-
 setup_git_identity() {
   local git_name git_email
 
@@ -103,7 +99,7 @@ setup_1password() {
 }
 
 start_tailscaled() {
-  if is_docker; then
+  if [ "${OMATERM_DOCKER:-}" = "1" ] || [ -f /.dockerenv ]; then
     sudo mkdir -p /var/lib/tailscale /var/run/tailscale
     sudo rm -f /var/run/tailscale/tailscaled.sock
     sudo sh -c 'tailscaled --tun=userspace-networking --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock >/tmp/tailscaled.log 2>&1 &'
