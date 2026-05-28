@@ -4,7 +4,7 @@ set -euo pipefail
 MARKER="$HOME/.omaterm-setup-done"
 
 if [ -f "$MARKER" ]; then
-  exec bash -l "$@"
+  exit 0
 fi
 
 setup_git_identity() {
@@ -34,51 +34,32 @@ setup_git_identity() {
   echo "✓ Git identity"
 }
 
-install_shell_helpers() {
+install_1password_shell_helpers() {
   local shell_rc="$HOME/.bashrc"
 
-  if grep -qF '# Omaterm shell helpers' "$shell_rc" 2>/dev/null; then
+  if grep -qF 'op-signin()' "$shell_rc" 2>/dev/null; then
     return
   fi
 
   cat >>"$shell_rc" <<'EOF'
 
 # Omaterm shell helpers
-op-unlock() {
-  local -a signin_args=()
-
+op-signin() {
   command -v op >/dev/null || return 127
-
-  if op whoami >/dev/null 2>&1; then
-    echo "✓ 1Password unlocked"
-    return 0
-  fi
-
-  if ! op account list --format json 2>/dev/null | jq -e 'length > 0' >/dev/null; then
-    echo "No 1Password CLI account configured. Adding one now."
-    op account add || return
-  fi
-
-  if [ -n "${OP_ACCOUNT:-}" ]; then
-    signin_args+=(--account "$OP_ACCOUNT")
-  fi
-
-  eval "$(op signin "${signin_args[@]}")"
-  op whoami >/dev/null && echo "✓ 1Password unlocked"
+  eval "$(op signin)"
 }
 EOF
-  echo "✓ Shell helpers"
+  echo "✓ 1Password helper"
 }
 
-signin_1password() {
-  local -a signin_args=()
+eval_1password() {
+  local signin_exports
 
-  if [ -n "${OP_ACCOUNT:-}" ]; then
-    signin_args+=(--account "$OP_ACCOUNT")
+  if ! signin_exports="$("$@")"; then
+    return 1
   fi
 
-  eval "$(op signin "${signin_args[@]}")"
-  op whoami >/dev/null
+  eval "$signin_exports"
 }
 
 setup_1password() {
@@ -91,10 +72,11 @@ setup_1password() {
   fi
 
   if ! op account list --format json 2>/dev/null | jq -e 'length > 0' >/dev/null; then
-    op account add
+    eval_1password op account add --signin
+  else
+    eval_1password op signin
   fi
 
-  signin_1password
   echo "✓ 1Password"
 }
 
@@ -103,6 +85,8 @@ start_tailscaled() {
     sudo mkdir -p /var/lib/tailscale /var/run/tailscale
     sudo rm -f /var/run/tailscale/tailscaled.sock
     sudo sh -c 'tailscaled --tun=userspace-networking --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock >/tmp/tailscaled.log 2>&1 &'
+  elif systemctl cat tailscaled.service &>/dev/null; then
+    sudo systemctl enable --now tailscaled.service
   else
     sudo sh -c 'tailscaled >/tmp/tailscaled.log 2>&1 &'
   fi
@@ -129,6 +113,25 @@ setup_tailscale() {
   fi
 
   sudo tailscale up "${tailscale_args[@]}"
+}
+
+setup_proxmox_serial_console() {
+  if ! grep -qi proxmox /sys/class/dmi/id/product_name 2>/dev/null || [ ! -e /dev/ttyS0 ]; then
+    return
+  fi
+
+  if systemctl is-enabled serial-getty@ttyS0.service &>/dev/null; then
+    return
+  fi
+
+  echo
+  if ! gum confirm "Proxmox VM detected with serial port. Enable serial console?"; then
+    return
+  fi
+
+  sudo systemctl enable serial-getty@ttyS0.service
+  sudo systemctl start serial-getty@ttyS0.service
+  echo "✓ Serial console enabled on ttyS0"
 }
 
 setup_ssh_public_key() {
@@ -196,7 +199,7 @@ echo
 setup_git_identity
 
 # Shell helpers
-install_shell_helpers
+install_1password_shell_helpers
 
 # GitHub CLI
 if ! gh auth status &>/dev/null; then
@@ -215,7 +218,9 @@ setup_ssh_public_key
 # Tailscale
 setup_tailscale
 
+# Proxmox serial console
+setup_proxmox_serial_console
+
 echo
 echo "✓ Setup complete!"
 touch "$MARKER"
-exec bash -l "$@"

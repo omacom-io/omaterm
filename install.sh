@@ -66,44 +66,6 @@ fi
 EOF
     echo "✓ Tmux auto-start"
   fi
-
-  install_shell_helpers "$shell_rc"
-}
-
-install_shell_helpers() {
-  local shell_rc="$1"
-
-  if grep -qF '# Omaterm shell helpers' "$shell_rc" 2>/dev/null; then
-    return
-  fi
-
-  cat >>"$shell_rc" <<'EOF'
-
-# Omaterm shell helpers
-op-unlock() {
-  local -a signin_args=()
-
-  command -v op >/dev/null || return 127
-
-  if op whoami >/dev/null 2>&1; then
-    echo "✓ 1Password unlocked"
-    return 0
-  fi
-
-  if ! op account list --format json 2>/dev/null | jq -e 'length > 0' >/dev/null; then
-    echo "No 1Password CLI account configured. Adding one now."
-    op account add || return
-  fi
-
-  if [ -n "${OP_ACCOUNT:-}" ]; then
-    signin_args+=(--account "$OP_ACCOUNT")
-  fi
-
-  eval "$(op signin "${signin_args[@]}")"
-  op whoami >/dev/null && echo "✓ 1Password unlocked"
-}
-EOF
-  echo "✓ 1Password helper"
 }
 
 install_bins() {
@@ -113,22 +75,6 @@ install_bins() {
   chmod +x "$HOME/.local/bin/"*
   echo "✓ omaterm-theme"
   echo "✓ omaterm-refresh"
-}
-
-configure_shell() {
-  section "Configuring shell..."
-  local username bash_path current_shell
-
-  username="${USER:-$(id -un)}"
-  bash_path="$(command -v bash)"
-  current_shell="$(getent passwd "$username" | cut -d: -f7)"
-
-  if [ "$current_shell" != "$bash_path" ]; then
-    as_root usermod -s "$bash_path" "$username"
-  fi
-
-  export SHELL="$bash_path"
-  echo "✓ Bash"
 }
 
 install_mise_tools() {
@@ -145,8 +91,11 @@ install_mise_tools() {
   export PATH="$HOME/.local/share/mise/shims:$PATH"
 }
 
-setup_docker_group() {
+enable_docker() {
   local username
+
+  sudo systemctl enable docker.service
+  sudo systemctl start --no-block docker.service
 
   username="${USER:-$(id -un)}"
 
@@ -157,11 +106,7 @@ setup_docker_group() {
       sudo adduser "$username" docker
     fi
   fi
-}
 
-enable_docker() {
-  sudo systemctl enable docker.service
-  sudo systemctl start --no-block docker.service
   echo "✓ Docker"
 }
 
@@ -188,70 +133,14 @@ enable_services() {
   enable_ssh
 }
 
-signin_1password() {
-  local -a signin_args=()
-
-  if [ -n "${OP_ACCOUNT:-}" ]; then
-    signin_args+=(--account "$OP_ACCOUNT")
-  fi
-
-  eval "$(op signin "${signin_args[@]}")"
-  op whoami >/dev/null
-}
-
-setup_1password() {
-  command -v op &>/dev/null || return 0
-  op whoami &>/dev/null && return 0
-
-  echo
-  if ! gum confirm "Authenticate with 1Password?" </dev/tty; then
-    return 0
-  fi
-
-  if ! op account list --format json 2>/dev/null | jq -e 'length > 0' >/dev/null; then
-    op account add
-  fi
-
-  signin_1password
-  echo "✓ 1Password"
-}
-
-interactive_setup() {
-  section "Interactive setup..."
-
-  if ! gh auth status &>/dev/null; then
-    echo
-    if gum confirm "Authenticate with GitHub?" </dev/tty; then
-      gh auth login
-    fi
-  fi
-
-  setup_1password
-
-  if ! tailscale status &>/dev/null; then
-    echo
-    if gum confirm "Connect to Tailscale network?" </dev/tty; then
-      echo "This might take a minute..."
-      sudo systemctl enable --now tailscaled.service
-      sudo tailscale up --ssh --accept-routes
-    fi
-  fi
-
-  if grep -qi proxmox /sys/class/dmi/id/product_name 2>/dev/null && [ -e /dev/ttyS0 ]; then
-    if ! systemctl is-enabled serial-getty@ttyS0.service &>/dev/null; then
-      echo
-      if gum confirm "Proxmox VM detected with serial port. Enable serial console?" </dev/tty; then
-        sudo systemctl enable serial-getty@ttyS0.service
-        sudo systemctl start serial-getty@ttyS0.service
-        echo "✓ Serial console enabled on ttyS0"
-      fi
-    fi
-  fi
-}
-
 finish() {
   section "Finished!"
   echo "Now logout and back in for everything to take effect"
+}
+
+run_first_setup() {
+  section "First-run setup..."
+  "$HOME/.local/bin/omaterm-setup"
 }
 
 configure_parallel_builds() {
@@ -272,9 +161,6 @@ run_installation() {
   # OS-specific package installation
   install_packages
 
-  # Make Bash the default shell before Omadots writes shell config
-  configure_shell
-
   # Omadots
   install_omadots
 
@@ -288,11 +174,8 @@ run_installation() {
   # OS-specific service enabling
   enable_services
 
-  # Setup Docker group
-  setup_docker_group
-
-  # Interactive setup
-  interactive_setup
+  # First-run setup
+  run_first_setup
 
   # Done!
   finish

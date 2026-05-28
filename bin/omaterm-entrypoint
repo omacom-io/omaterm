@@ -51,13 +51,22 @@ setup_docker_socket_access() {
 setup_docker_socket_access
 start_tailscaled_if_configured
 
-exec runuser -u omaterm -- env \
-  HOME=/home/omaterm \
-  USER=omaterm \
-  LOGNAME=omaterm \
-  SHELL=/bin/bash \
-  TERM="${TERM:-xterm-256color}" \
-  OMATERM_DOCKER=1 \
-  OMATERM_HOSTNAME="$(cat "$OMATERM_HOSTNAME_FILE" 2>/dev/null || hostname)" \
-  PATH="/home/omaterm/.local/share/mise/shims:/home/omaterm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin" \
-  /home/omaterm/.local/bin/omaterm-setup "$@"
+OMATERM_HOSTNAME="$(cat "$OMATERM_HOSTNAME_FILE" 2>/dev/null || hostname)"
+OMATERM_ENV=(
+  HOME=/home/omaterm
+  USER=omaterm
+  LOGNAME=omaterm
+  SHELL=/bin/bash
+  TERM="${TERM:-xterm-256color}"
+  OMATERM_DOCKER=1
+  OMATERM_HOSTNAME="$OMATERM_HOSTNAME"
+  PATH="/home/omaterm/.local/share/mise/shims:/home/omaterm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin"
+)
+
+run_as_omaterm() {
+  runuser -u omaterm -- env "${OMATERM_ENV[@]}" "$@"
+}
+
+run_as_omaterm /home/omaterm/.local/bin/omaterm-setup
+
+exec runuser -u omaterm -- env "${OMATERM_ENV[@]}" bash -l "$@"

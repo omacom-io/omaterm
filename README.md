@@ -70,7 +70,7 @@ And you'll be offered to setup:
 Run this in the shell that will run your deploy:
 
 ```bash
-op-unlock
+op-signin
 ```
 
-This signs in to 1Password when needed and exports the session into the current shell so deploy tools can use `op`.
+This signs in to 1Password and exports the session into the current shell so deploy tools can use `op`.
