@@ -21,6 +21,5 @@ libyaml
 docker
 docker-buildx
 docker-compose
-fuse-overlayfs
 tailscale
 kitty-terminfo

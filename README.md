@@ -30,18 +30,8 @@ curl -fsSL https://omaterm.org/install | bash
 ## Install via Docker
 
 ```bash
-docker run -it --name omaterm --privileged --cgroupns=host ghcr.io/omacom-io/omaterm
+docker run -it --name omaterm -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/omacom-io/omaterm
 ```
-
-Omaterm uses Docker-in-Docker, so Docker images, volumes, and databases are isolated inside the named container. For another isolated Omaterm, use a different container name.
-
-For multiple Omaterms or full-core workloads, set explicit resource limits and leave headroom for the host OS:
-
-```bash
-docker run -it --name omaterm2 --privileged --cgroupns=host --cpus=6 --memory=16g --memory-swap=16g ghcr.io/omacom-io/omaterm
-```
-
-Omaterm uses `--cgroupns=host` so Docker-in-Docker can run compose services with memory limits. The entrypoint places nested Docker containers under Omaterm's cgroup, so outer `--cpus` and `--memory` limits still contain the nested workload.
 
 Then setup this alias in your shell to be able to start omaterm easily:
 
@@ -49,7 +39,7 @@ Then setup this alias in your shell to be able to start omaterm easily:
 alias omaterm='docker start -ai omaterm'
 ```
 
-The named container persists its filesystem across starts, including home directory state, installed packages, git config, shell history, and projects. Remove it with `docker rm omaterm` when you want to reset.
+The named container persists its filesystem across starts, including home directory state, installed packages, git config, shell history, and projects. Docker state is stored by the host daemon. Remove the Omaterm container with `docker rm omaterm` when you want to reset its shell environment. Omaterm uses the host Docker daemon through `/var/run/docker.sock`, so images, volumes, networks, and databases are shared with the host.
 
 ## Interactive prompts
 
