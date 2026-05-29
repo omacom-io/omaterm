@@ -8,18 +8,25 @@ THEMES=(
   aether
   bamboo
   catppuccin
+  catppuccin-latte
   ethereal
   everforest
   flexoki
   gruvbox
   hackerman
   kanagawa
+  lumon
   matteblack
   miasma
   monokai-pro
   nord
+  osaka-jade
+  retro-82
+  ristretto
   rose-pine
   tokyonight
+  vantablack
+  white
 )
 
 THEME_FILE="$HOME/.config/omaterm/nvim.theme"
