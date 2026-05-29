@@ -145,11 +145,21 @@ setup_1password() {
   op whoami &>/dev/null && return 0
 
   if gum confirm "Authenticate with 1Password?"; then
+    local session
+
     if ! op account list --format json 2>/dev/null | jq -e 'length > 0' >/dev/null; then
-      eval "$(op account add --signin)" || return 1
-    else
-      eval "$(op signin)" || return 1
+      # Enroll the account interactively. Don't capture stdout: with stdout
+      # redirected (as in `eval "$(...)"`) op switches to non-interactive mode
+      # and fails with "missing --address flag" instead of prompting.
+      op account add || return 1
     fi
+
+    # `op signin` is the command designed to be eval'd: it prints the session
+    # token as shell exports on stdout while prompting on the tty. Capture it to
+    # a variable so a real failure is detected (eval of an empty string would
+    # otherwise succeed and mask the error).
+    session="$(op signin)" || return 1
+    eval "$session"
 
     echo "✓ 1Password"
     echo
