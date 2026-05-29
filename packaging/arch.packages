@@ -27,6 +27,7 @@ rust
 mise
 libyaml
 docker
+docker-buildx
 docker-compose
 fuse-overlayfs
 tailscale
