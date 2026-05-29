@@ -157,10 +157,14 @@ run_first_setup() {
   section "First-run setup..."
   "$HOME/.local/bin/omaterm-setup"
 
+  # Reconnect stdin to the terminal before handing off. Installed via
+  # `curl ... | bash`, this script's stdin is the pipe, so a bare `exec bash -l`
+  # would be a non-interactive shell that skips .bashrc's tmux auto-start (and
+  # exits immediately on the consumed pipe).
   if [ "$DOCKER_GROUP_REFRESH" = "1" ] && command -v sg &>/dev/null; then
-    exec sg docker -c 'exec bash -l'
+    exec sg docker -c 'exec bash -l </dev/tty'
   else
-    exec bash -l
+    exec bash -l </dev/tty
   fi
 }
 
