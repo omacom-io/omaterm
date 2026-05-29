@@ -5,6 +5,7 @@ TAILSCALE_STATE="/var/lib/tailscale/tailscaled.state"
 TAILSCALE_SOCKET="/var/run/tailscale/tailscaled.sock"
 DIND_SOCKET="/var/run/omaterm-docker.sock"
 DIND_HOST="unix://$DIND_SOCKET"
+DIND_CGROUP_PARENT=""
 
 tailscaled_running() {
   local comm
@@ -50,6 +51,56 @@ dockerd_responding() {
   docker --host "$DIND_HOST" info &>/dev/null
 }
 
+setup_dind_cgroup_parent() {
+  local cgroup_path
+  local cgroup_root="/sys/fs/cgroup"
+  local base_cgroup init_cgroup docker_cgroup
+  local controller pid
+
+  cgroup_path="$(awk -F: '$1 == "0" { print $3 }' /proc/1/cgroup)"
+
+  [ -n "$cgroup_path" ] && [ "$cgroup_path" != "/" ] || return 0
+
+  base_cgroup="$cgroup_root$cgroup_path"
+  init_cgroup="$base_cgroup/omaterm-init"
+  docker_cgroup="$base_cgroup/omaterm-docker"
+
+  [ -d "$base_cgroup" ] || return 0
+
+  mkdir -p "$init_cgroup" "$docker_cgroup"
+
+  while read -r pid; do
+    [ -n "$pid" ] && printf "%s\n" "$pid" >"$init_cgroup/cgroup.procs" 2>/dev/null || true
+  done <"$base_cgroup/cgroup.procs"
+
+  printf "%s\n" "$$" >"$init_cgroup/cgroup.procs" 2>/dev/null || true
+
+  for controller in $(cat "$base_cgroup/cgroup.controllers" 2>/dev/null); do
+    printf "+%s\n" "$controller" >"$base_cgroup/cgroup.subtree_control" 2>/dev/null || true
+  done
+
+  for controller in $(cat "$docker_cgroup/cgroup.controllers" 2>/dev/null); do
+    printf "+%s\n" "$controller" >"$docker_cgroup/cgroup.subtree_control" 2>/dev/null || true
+  done
+
+  DIND_CGROUP_PARENT="$cgroup_path/omaterm-docker"
+}
+
+warn_private_cgroup_namespace() {
+  local cgroup_path
+
+  cgroup_path="$(awk -F: '$1 == "0" { print $3 }' /proc/1/cgroup)"
+
+  if [ "$cgroup_path" = "/" ]; then
+    cat >&2 <<'EOF'
+Warning: Omaterm is not running with the host cgroup namespace.
+Docker-in-Docker containers with resource limits may fail to start. Use
+--cgroupns=host when starting Omaterm.
+
+EOF
+  fi
+}
+
 # Prefer overlay2 (copy-on-write) and only fall back to the slow, disk-heavy
 # vfs driver when faster drivers fail to start (e.g. overlay-on-overlay).
 DIND_STORAGE_DRIVERS=(overlay2 fuse-overlayfs vfs)
@@ -60,15 +111,22 @@ start_dind() {
   dockerd_responding && return 0
 
   ensure_docker_group
+  setup_dind_cgroup_parent
 
   local driver dockerd_pid i
+  local cgroup_args=()
+
+  if [ -n "$DIND_CGROUP_PARENT" ]; then
+    cgroup_args=(--cgroup-parent="$DIND_CGROUP_PARENT")
+  fi
+
   for driver in "${DIND_STORAGE_DRIVERS[@]}"; do
     if [ "$driver" = "fuse-overlayfs" ] && ! command -v fuse-overlayfs &>/dev/null; then
       continue
     fi
 
     rm -f "$DIND_SOCKET"
-    dockerd --host "$DIND_HOST" --group docker --storage-driver="$driver" \
+    dockerd --host "$DIND_HOST" --group docker "${cgroup_args[@]}" --storage-driver="$driver" \
       >/var/log/dockerd.log 2>&1 &
     dockerd_pid=$!
 
@@ -92,6 +150,7 @@ start_dind() {
 }
 
 /home/omaterm/.local/bin/omaterm-setup-sudopw
+warn_private_cgroup_namespace
 start_dind
 start_tailscaled_if_configured
 

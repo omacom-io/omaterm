@@ -33,11 +33,15 @@ curl -fsSL https://omaterm.org/install | bash
 docker run -it --name omaterm --privileged --cgroupns=host ghcr.io/omacom-io/omaterm
 ```
 
-Omaterm uses Docker-in-Docker, so Docker images, volumes, and databases are isolated inside the named container. For another isolated Omaterm, use a different container name:
+Omaterm uses Docker-in-Docker, so Docker images, volumes, and databases are isolated inside the named container. For another isolated Omaterm, use a different container name.
+
+For multiple Omaterms or full-core workloads, set explicit resource limits and leave headroom for the host OS:
 
 ```bash
-docker run -it --name omaterm2 --privileged --cgroupns=host ghcr.io/omacom-io/omaterm
+docker run -it --name omaterm2 --privileged --cgroupns=host --cpus=6 --memory=16g --memory-swap=16g ghcr.io/omacom-io/omaterm
 ```
+
+Omaterm uses `--cgroupns=host` so Docker-in-Docker can run compose services with memory limits. The entrypoint places nested Docker containers under Omaterm's cgroup, so outer `--cpus` and `--memory` limits still contain the nested workload.
 
 Then setup this alias in your shell to be able to start omaterm easily:
 
