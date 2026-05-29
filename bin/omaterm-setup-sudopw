@@ -8,7 +8,7 @@ setup_sudo_password() {
 
   if [ ! -t 0 ]; then
     echo "Error: First-run Docker setup needs an interactive terminal to set the omaterm sudo password."
-    echo "Run with: docker run -it --name omaterm ghcr.io/omacom-io/omaterm"
+    echo "Run with: docker run -it --name omaterm --network host -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/omacom-io/omaterm"
     exit 1
   fi
 

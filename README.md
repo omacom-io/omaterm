@@ -30,7 +30,7 @@ curl -fsSL https://omaterm.org/install | bash
 ## Install via Docker
 
 ```bash
-docker run -it --name omaterm -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/omacom-io/omaterm
+docker run -it --name omaterm --net host -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/omacom-io/omaterm
 ```
 
 Then setup this alias in your shell to be able to start omaterm easily:
@@ -39,7 +39,7 @@ Then setup this alias in your shell to be able to start omaterm easily:
 alias omaterm='docker start -ai omaterm'
 ```
 
-The named container persists its filesystem across starts, including home directory state, installed packages, git config, shell history, and projects. Docker state is stored by the host daemon. Remove the Omaterm container with `docker rm omaterm` when you want to reset its shell environment. Omaterm uses the host Docker daemon through `/var/run/docker.sock`, so images, volumes, networks, and databases are shared with the host.
+The named container persists its filesystem across starts, including home directory state, installed packages, git config, shell history, and projects. Docker state is stored by the host daemon. Remove the Omaterm container with `docker rm omaterm` when you want to reset its shell environment. Omaterm uses the host Docker daemon through `/var/run/docker.sock`, so images, volumes, networks, and databases are shared with the host. It also uses host networking so services published to host localhost by those containers are reachable from inside Omaterm.
 
 ## Interactive prompts
 
