@@ -7,17 +7,10 @@ net-tools
 whois
 fzf
 zoxide
-tmux
 btop
 jq
 man-db
 vim
-neovim
-starship
-gum
-gh
-1password-cli
-lazygit
 luarocks
 clang
 llvm
@@ -26,5 +19,6 @@ cargo
 libyaml
 curl
 wget
+docker-buildx
 tailscale
 kitty-terminfo

@@ -26,7 +26,6 @@ RUN curl -fsSL https://raw.githubusercontent.com/omacom-io/omadots/refs/heads/ma
 # Copy configs and bins
 COPY --chown=omaterm:omaterm config/ /home/omaterm/.config/
 COPY --chown=omaterm:omaterm bin/ /home/omaterm/.local/bin/
-COPY --chown=omaterm:omaterm packaging/mise.packages /tmp/mise.packages
 RUN chmod +x /home/omaterm/.local/bin/*
 
 # Auto-start tmux in .bashrc
@@ -36,6 +35,8 @@ if [[ -z $TMUX ]]; then
   t
 fi
 EOF
+
+COPY --chown=omaterm:omaterm packaging/mise.packages /tmp/mise.packages
 
 # Install user tools via mise
 # Do not bake BuildKit's GPG/keyboxd state into runtime containers.

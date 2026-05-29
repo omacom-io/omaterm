@@ -8,16 +8,10 @@ net-tools
 whois
 fzf
 zoxide
-tmux
 btop
 jq
 man-db
 vim
-neovim
-eza
-gum
-gh
-1password-cli
 luarocks
 clang
 llvm
@@ -27,5 +21,6 @@ curl
 wget
 gpg
 docker.io
+docker-buildx
 docker-compose-v2
 kitty-terminfo

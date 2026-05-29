@@ -17,7 +17,7 @@ An Omakase Terminal Setup For Arch/Debian/Ubuntu/Fedora/Docker by DHH. Think of 
 - **Networking**: SSH, tailscale
 - **Git**: Interactive config for user name/email, helpful aliases
 
-Core CLI tools are installed through the OS package manager where possible. Docker builds install the bundled mise tools using the build `GITHUB_TOKEN`; non-Docker installs can add agent tools after setup with commands like `mise use -g codex`.
+Core system packages are installed through the OS package manager. User-facing tools such as Neovim, tmux, Starship, eza, gum, GitHub CLI, 1Password CLI, lazygit, lazydocker, and the AI agents are installed through mise after the OS packages are in place.
 
 ## Install directly
 

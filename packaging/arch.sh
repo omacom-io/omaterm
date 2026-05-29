@@ -28,7 +28,7 @@ reboot_if_kernel_upgraded() {
   echo "A reboot is required before Omaterm setup can continue."
   echo
 
-  if gum confirm "Reboot now and re-run the Omaterm installer afterwards?"; then
+  if confirm "Reboot now and re-run the Omaterm installer afterwards?"; then
     sudo systemctl reboot
     exit 0
   fi
