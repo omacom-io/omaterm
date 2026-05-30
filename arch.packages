@@ -12,6 +12,17 @@ btop
 jq
 man-db
 vim
+nodejs
+npm
+neovim
+tmux
+1password-cli
+starship
+eza
+gum
+github-cli
+lazygit
+lazydocker
 luarocks
 clang
 llvm

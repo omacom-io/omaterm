@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 FROM archlinux:latest
 
-COPY packaging/arch.packages /tmp/arch.packages
+COPY arch.packages /tmp/arch.packages
 
 # Update system and install official/Omarchy packages
 RUN printf 'Server = https://mirror.omarchy.org/$repo/os/$arch\n' > /etc/pacman.d/mirrorlist && \
@@ -36,9 +36,9 @@ if [[ -z $TMUX ]]; then
 fi
 EOF
 
-COPY --chown=omaterm:omaterm packaging/mise.packages /tmp/mise.packages
+COPY --chown=omaterm:omaterm mise.packages /tmp/mise.packages
 
-# Install user tools via mise
+# Install AI tooling via mise
 # Do not bake BuildKit's GPG/keyboxd state into runtime containers.
 RUN --mount=type=secret,id=GITHUB_TOKEN,required=true,uid=1000,gid=1000 \
     github_token="$(cat /run/secrets/GITHUB_TOKEN)" && \

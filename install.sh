@@ -1,10 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DOCKER_GROUP_REFRESH=0
-
-# Common functions for Omaterm installation
-show_banner() {
+banner() {
   clear
   echo
   echo " ▄██████▄    ▄▄▄▄███▄▄▄▄      ▄████████     ███        ▄████████    ▄████████   ▄▄▄▄███▄▄▄▄  
@@ -16,95 +13,107 @@ show_banner() {
 ███    ███ ███   ███   ███   ███    ███     ███       ███    ███   ███    ███ ███   ███   ███
  ▀██████▀   ▀█   ███   █▀    ███    █▀     ▄████▀     ██████████   ███    ███  ▀█   ███   █▀ 
                                                                    ███    ███                "
+  section "Installing Omaterm..."
 }
 
 section() {
   echo -e "\n==> $1"
 }
 
-confirm() {
-  local answer prompt
+ensure_arch_installation() {
+  if [ ! -f /etc/arch-release ]; then
+    echo "Error: This is not Arch Linux"
+    echo "Use Docker installation instead."
+    exit 1
+  fi
+}
 
-  prompt="$1"
+setup_omaterm_user_when_root() {
+  if [ "$EUID" -eq 0 ]; then
+    local answer
 
-  if command -v gum &>/dev/null; then
-    gum confirm "$prompt"
+    read -r -p "You can't install as root. Add omaterm user? [Y/n] " answer </dev/tty
+
+    if [[ "$answer" =~ ^[Nn]([Oo])?$ ]]; then
+      exit 1
+    fi
+
+    if ! id omaterm &>/dev/null; then
+      useradd -m -s /bin/bash omaterm
+      passwd omaterm
+    fi
+
+    mkdir -p /etc/sudoers.d
+    printf 'omaterm ALL=(ALL) ALL\n' >/etc/sudoers.d/omaterm
+    chmod 0440 /etc/sudoers.d/omaterm
+
+    echo "Switching to omaterm. Run the Omaterm installer again from there."
+    exec su - omaterm
+  fi
+}
+
+setup_arch_package_repositories() {
+  section "Configuring Omarchy package repository and mirror..."
+
+  sudo tee /etc/pacman.d/mirrorlist >/dev/null <<'EOF'
+Server = https://mirror.omarchy.org/$repo/os/$arch
+EOF
+
+  if grep -qxF "[omarchy]" /etc/pacman.conf; then
+    sudo sed -i '/^\[omarchy\]$/,/^\[/{s|^SigLevel = .*|SigLevel = Optional TrustAll|; s|^Server = https://pkgs\.omarchy\.org/[^/]*/\$arch|Server = https://pkgs.omarchy.org/edge/$arch|}' /etc/pacman.conf
+  else
+    sudo tee -a /etc/pacman.conf >/dev/null <<'EOF'
+
+[omarchy]
+SigLevel = Optional TrustAll
+Server = https://pkgs.omarchy.org/edge/$arch
+EOF
+  fi
+}
+
+setup_git_checkout() {
+  sudo pacman -Syu --needed --noconfirm git
+
+  local repo="https://github.com/omacom-io/omaterm.git"
+  local omaterm_ref="${OMATERM_REF:-master}"
+  INSTALLER_DIR="$(mktemp -d)"
+  trap 'rm -rf "$INSTALLER_DIR"' EXIT
+
+  echo "Cloning Omaterm from $repo ($omaterm_ref)..."
+  git clone --depth 1 --branch "$omaterm_ref" "$repo" "$INSTALLER_DIR"
+}
+
+install_packages() {
+  local -a official_pkgs
+  mapfile -t official_pkgs < <(grep -vE '^[[:space:]]*(#|$)' "$INSTALLER_DIR/arch.packages")
+
+  section "Installing Arch packages..."
+  sudo pacman -Syu --needed --noconfirm "${official_pkgs[@]}"
+  reboot_if_kernel_upgraded
+}
+
+reboot_if_kernel_upgraded() {
+  if [ -d "/lib/modules/$(uname -r)" ]; then
     return
   fi
 
-  read -r -p "$prompt [y/N] " answer </dev/tty
-  [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]]
-}
+  section "Kernel was upgraded during package install"
+  echo "The running kernel ($(uname -r)) no longer has matching modules on disk,"
+  echo "so services like tailscaled, docker, and iptables will fail to start."
+  echo "A reboot is required before Omaterm setup can continue."
+  echo
 
-detect_os() {
-  if [ -f /etc/arch-release ]; then
-    echo "arch"
-  elif [ -f /etc/debian_version ]; then
-    echo "debian"
-  elif [ -f /etc/fedora-release ]; then
-    echo "fedora"
-  else
-    return 1
-  fi
-}
-
-as_root() {
-  if [ "$EUID" -eq 0 ]; then
-    "$@"
-  else
-    sudo "$@"
-  fi
-}
-
-setup_arch_package_mirror() {
-  as_root tee /etc/pacman.d/mirrorlist >/dev/null <<'EOF'
-Server = https://mirror.omarchy.org/$repo/os/$arch
-EOF
-}
-
-read_package_file() {
-  grep -vE '^[[:space:]]*(#|$)' "$1"
-}
-
-setup_omaterm_user() {
-  local answer
-
-  read -r -p "You can't install as root. Add omaterm user? [Y/n] " answer </dev/tty
-
-  if [[ "$answer" =~ ^[Nn]([Oo])?$ ]]; then
-    exit 1
+  if gum confirm "Reboot now and re-run the Omaterm installer afterwards?"; then
+    sudo systemctl reboot
+    exit 0
   fi
 
-  if ! id omaterm &>/dev/null; then
-    useradd -m -s /bin/bash omaterm
-    passwd omaterm
-  fi
-
-  mkdir -p /etc/sudoers.d
-  printf 'omaterm ALL=(ALL) ALL\n' >/etc/sudoers.d/omaterm
-  chmod 0440 /etc/sudoers.d/omaterm
-
-  echo "Switching to omaterm. Run the Omaterm installer again from there."
-  exec su - omaterm
+  echo "Aborting. Reboot and re-run the Omaterm installer to continue."
+  exit 1
 }
 
 install_omadots() {
   curl -fsSL https://raw.githubusercontent.com/omacom-io/omadots/refs/heads/master/install.sh | bash
-}
-
-install_mise_tools() {
-  local -a mise_packages
-
-  section "Installing mise tools..."
-  export PATH="$HOME/.local/bin:$HOME/.local/share/mise/shims:$PATH"
-  eval "$(mise activate bash)" 2>/dev/null || true
-
-  mapfile -t mise_packages < <(read_package_file "$INSTALLER_DIR/packaging/mise.packages")
-
-  mise settings set idiomatic_version_file_enable_tools ruby
-  mise use -g -y "${mise_packages[@]}"
-
-  export PATH="$HOME/.local/share/mise/shims:$PATH"
 }
 
 install_configs() {
@@ -136,124 +145,59 @@ install_bins() {
   echo "✓ omaterm-refresh"
 }
 
-enable_docker() {
-  local username
+install_mise_tools() {
+  local -a mise_packages
 
-  sudo systemctl enable docker.service
-  sudo systemctl start --no-block docker.service
+  section "Installing AI tooling..."
+  export PATH="$HOME/.local/bin:$HOME/.local/share/mise/shims:$PATH"
+  eval "$(mise activate bash)" 2>/dev/null || true
 
-  username="${USER:-$(id -un)}"
+  mapfile -t mise_packages < <(grep -vE '^[[:space:]]*(#|$)' "$INSTALLER_DIR/mise.packages")
 
-  if ! id -nG | grep -qw docker; then
-    DOCKER_GROUP_REFRESH=1
-  fi
+  mise settings set idiomatic_version_file_enable_tools ruby
+  mise use -g -y "${mise_packages[@]}"
 
-  if ! id -nG "$username" | grep -qw docker; then
-    if command -v usermod &>/dev/null; then
-      sudo usermod -aG docker "$username"
-    else
-      sudo adduser "$username" docker
-    fi
-  fi
-
-  echo "✓ Docker"
+  export PATH="$HOME/.local/share/mise/shims:$PATH"
 }
 
-enable_ssh() {
-  local ssh_service
-
-  if systemctl cat sshd.service &>/dev/null; then
-    ssh_service="sshd.service"
-  elif systemctl cat ssh.service &>/dev/null; then
-    ssh_service="ssh.service"
-  else
-    echo "Error: Could not find an SSH systemd service"
-    return 1
-  fi
-
-  sudo systemctl enable --now "$ssh_service"
-  echo "✓ sshd"
-}
 
 enable_services() {
   section "Enabling services..."
 
-  enable_docker
-  enable_ssh
+  sudo systemctl enable docker.service
+  sudo systemctl start --no-block docker.service
+  sudo usermod -aG docker "${USER:-$(id -un)}"
+  echo "✓ Docker"
+
+  sudo systemctl enable --now sshd.service
+  echo "✓ sshd"
 }
 
 run_first_setup() {
   section "First-run setup..."
   "$HOME/.local/bin/omaterm-setup"
-
-  # Reconnect stdin to the terminal before handing off. Installed via
-  # `curl ... | bash`, this script's stdin is the pipe, so a bare `exec bash -l`
-  # would be a non-interactive shell that skips .bashrc's tmux auto-start (and
-  # exits immediately on the consumed pipe).
-  if [ "$DOCKER_GROUP_REFRESH" = "1" ] && command -v sg &>/dev/null; then
-    exec sg docker -c 'exec bash -l </dev/tty'
-  else
-    exec bash -l </dev/tty
-  fi
+  exec sg docker -c 'exec bash -l </dev/tty'
 }
 
 run_installation() {
-  # OS-specific package installation
+  banner
+
+  ensure_arch_installation
+
+  setup_omaterm_user_when_root
+  setup_arch_package_repositories
+  setup_git_checkout
+
   install_packages
-
-  # Omadots
   install_omadots
-
-  # Configs and bins
   install_configs
   install_bins
-
-  # Mise tooling
   install_mise_tools
 
-  # OS-specific service enabling
   enable_services
 
-  # First-run setup
   run_first_setup
 }
 
-# Getting started
-show_banner
-section "Installing Omaterm..."
-
-if [ "$EUID" -eq 0 ]; then
-  setup_omaterm_user
-fi
-
-if ! OS_ID="$(detect_os)"; then
-  echo "Error: Unsupported operating system"
-  echo "Omaterm supports Arch Linux, Debian/Ubuntu, and Fedora"
-  exit 1
-fi
-
-# Ensure correct git is installed
-if ! command -v git &>/dev/null; then
-  case "$OS_ID" in
-    arch) setup_arch_package_mirror && as_root pacman -Syu --needed --noconfirm git ;;
-    debian) as_root apt-get update && as_root apt-get install -y git ;;
-    fedora) as_root dnf install -y git ;;
-  esac
-fi
-
-REPO="https://github.com/omacom-io/omaterm.git"
-OMATERM_REF="${OMATERM_REF:-master}"
-INSTALLER_DIR="$(mktemp -d)"
-trap 'rm -rf "$INSTALLER_DIR"' EXIT
-
-echo "Cloning Omaterm from $REPO ($OMATERM_REF)..."
-git clone --depth 1 --branch "$OMATERM_REF" "$REPO" "$INSTALLER_DIR"
-
-# OS detection and dispatch
-case "$OS_ID" in
-  arch) source "$INSTALLER_DIR/packaging/arch.sh" ;;
-  debian) source "$INSTALLER_DIR/packaging/debian.sh" ;;
-  fedora) source "$INSTALLER_DIR/packaging/fedora.sh" ;;
-esac
-
+# Start installation
 run_installation

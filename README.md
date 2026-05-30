@@ -1,12 +1,6 @@
 # Omaterm
 
-An Omakase Terminal Setup For Arch/Debian/Ubuntu/Fedora/Docker by DHH. Think of it as a headless [Omarchy](https://omarchy.org).
-
-## Requirements
-
-- Base Arch/Debian/Ubuntu/Fedora Linux installation (or ability to start Docker)
-- Internet connection
-- `sudo` privileges
+An Omakase Terminal Setup For Arch/Docker by DHH. Think of it as a headless [Omarchy](https://omarchy.org).
 
 ## What it sets up
 
@@ -17,11 +11,11 @@ An Omakase Terminal Setup For Arch/Debian/Ubuntu/Fedora/Docker by DHH. Think of 
 - **Networking**: SSH, tailscale
 - **Git**: Interactive config for user name/email, helpful aliases
 
-Core system packages are installed through the OS package manager. User-facing tools such as Neovim, tmux, Starship, eza, gum, GitHub CLI, 1Password CLI, lazygit, lazydocker, and the AI agents are installed through mise after the OS packages are in place.
+Core system packages and user-facing tools such as Neovim, tmux, Starship, eza, gum, GitHub CLI, 1Password CLI, lazygit, and lazydocker are installed through Arch packages. The AI tooling is installed through mise after the OS packages are in place.
 
 ## Install directly
 
-This will automatically detect your host OS and install the correct packages accordingly:
+Install Omaterm directly on Arch Linux:
 
 ```bash
 curl -fsSL https://omaterm.org/install | bash
@@ -29,29 +23,16 @@ curl -fsSL https://omaterm.org/install | bash
 
 ## Install via Docker
 
+Install Omaterm via Docker on every other platform:
+
 ```bash
 docker run -it --name omaterm --net host -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/omacom-io/omaterm
 ```
 
-Then setup this alias in your shell to be able to start omaterm easily:
+Then setup this alias in your shell to be able to start Omaterm easily:
 
 ```bash
 alias omaterm='docker start -ai omaterm'
 ```
 
 The named container persists its filesystem across starts, including home directory state, installed packages, git config, shell history, and projects. Docker state is stored by the host daemon. Remove the Omaterm container with `docker rm omaterm` when you want to reset its shell environment. Omaterm uses the host Docker daemon through `/var/run/docker.sock`, so images, volumes, networks, and databases are shared with the host. It also uses host networking so services published to host localhost by those containers are reachable from inside Omaterm.
-
-## Interactive prompts
-
-During installation you'll be asked for:
-
-- Git user name
-- Git email address
-
-And you'll be offered to setup:
-
-- SSH public key
-- SSH key-only authentication
-- Tailscale
-- GitHub
-- 1Password

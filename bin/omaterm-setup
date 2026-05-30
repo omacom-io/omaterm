@@ -124,10 +124,6 @@ setup_ssh_public_key() {
       return
     fi
 
-    # Write a drop-in rather than editing sshd_config directly: distros such as
-    # Ubuntu cloud images Include /etc/ssh/sshd_config.d/*.conf and ship a
-    # 50-cloud-init.conf with "PasswordAuthentication yes" that would otherwise
-    # override the main config and silently keep password login enabled.
     if [ -d /etc/ssh/sshd_config.d ]; then
       printf 'PasswordAuthentication no\nKbdInteractiveAuthentication no\nPubkeyAuthentication yes\n' |
         sudo tee /etc/ssh/sshd_config.d/99-omaterm.conf >/dev/null || return 1
@@ -143,11 +139,7 @@ setup_ssh_public_key() {
       return 1
     fi
 
-    if systemctl cat sshd.service &>/dev/null; then
-      sudo systemctl restart sshd.service || return 1
-    elif systemctl cat ssh.service &>/dev/null; then
-      sudo systemctl restart ssh.service || return 1
-    fi
+    sudo systemctl restart sshd.service || return 1
 
     echo "✓ SSH"
     echo
