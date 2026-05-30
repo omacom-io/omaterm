@@ -162,7 +162,12 @@ enable_services() {
 run_first_setup() {
   section "First-run setup..."
   "$HOME/.local/bin/omaterm-setup"
-  exec sg docker -c 'exec bash -l </dev/tty'
+
+  if [ -r /dev/tty ]; then
+    exec bash -l </dev/tty >/dev/tty 2>&1
+  else
+    exec bash -l
+  fi
 }
 
 ensure_arch_installation
