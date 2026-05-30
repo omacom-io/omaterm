@@ -65,7 +65,7 @@ install_docker_packages() {
 
   if is_arch; then
     section "Installing Docker..."
-    sudo pacman -Syu --needed --noconfirm docker
+    sudo pacman -S --needed --noconfirm docker
   elif is_debian; then
     section "Installing Docker..."
     sudo apt-get update
