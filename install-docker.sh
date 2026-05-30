@@ -34,6 +34,10 @@ is_windows_bash() {
 
 docker_run_command() {
   cat <<'EOF'
+if [ -r /dev/tty ]; then
+  exec </dev/tty
+fi
+
 if docker container inspect omaterm >/dev/null 2>&1; then
   exec docker start -ai omaterm
 else
@@ -130,7 +134,7 @@ run_docker_installation() {
 
   section "Starting Omaterm..."
   if is_arch || is_debian || is_fedora; then
-    exec sg docker -c "$(docker_run_command)"
+    exec sg docker -c "$(docker_run_command)" </dev/tty
   else
     eval "$(docker_run_command)"
   fi
