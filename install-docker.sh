@@ -17,19 +17,8 @@ is_fedora() {
   [ -f /etc/fedora-release ]
 }
 
-is_macos() {
-  [ "$(uname -s)" = "Darwin" ]
-}
-
 is_wsl() {
   grep -qi microsoft /proc/version 2>/dev/null
-}
-
-is_windows_bash() {
-  case "$(uname -s)" in
-    CYGWIN* | MINGW* | MSYS*) return 0 ;;
-    *) return 1 ;;
-  esac
 }
 
 docker_run_command() {
@@ -47,21 +36,13 @@ EOF
 }
 
 install_docker_packages() {
-  if is_macos || is_wsl || is_windows_bash; then
+  if is_wsl; then
     if docker info >/dev/null 2>&1; then
       return
     fi
 
     echo "Error: Docker is not available."
-
-    if is_macos; then
-      echo "Install and start Docker Desktop for Mac, then re-run this installer."
-    elif is_wsl; then
-      echo "Install and start Docker Desktop for Windows with WSL integration enabled, then re-run this installer."
-    else
-      echo "Install and start Docker Desktop for Windows, then re-run this installer from WSL or a Docker-enabled shell."
-    fi
-
+    echo "Install and start Docker Desktop for Windows with WSL integration enabled, then re-run this installer."
     exit 1
   elif command -v docker &>/dev/null && systemctl cat docker.service &>/dev/null; then
     return
@@ -91,8 +72,6 @@ install_docker_alias() {
 
   if is_debian || is_wsl; then
     alias_file="$HOME/.bash_aliases"
-  elif [ -n "${ZSH_VERSION:-}" ] || [ "${SHELL:-}" = */zsh ]; then
-    alias_file="$HOME/.zshrc"
   else
     alias_file="$HOME/.bashrc"
   fi
