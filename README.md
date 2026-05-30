@@ -1,6 +1,6 @@
 # Omaterm
 
-An Omakase Terminal Setup For Arch/Docker by DHH. Think of it as a headless [Omarchy](https://omarchy.org).
+An Omakase Terminal Setup by DHH. Think of it as a headless [Omarchy](https://omarchy.org).
 
 ## What it sets up
 
@@ -13,17 +13,19 @@ An Omakase Terminal Setup For Arch/Docker by DHH. Think of it as a headless [Oma
 
 Core system packages and user-facing tools such as Neovim, tmux, Starship, eza, gum, GitHub CLI, 1Password CLI, lazygit, and lazydocker are installed through Arch packages. The AI tooling is installed through mise after the OS packages are in place.
 
-## Install directly
+## Install
 
-Install Omaterm directly on Arch Linux:
+This installs Omaterm via Docker (or offers to install natively on Arch).
 
 ```bash
 curl -fsSL https://omaterm.org/install | bash
 ```
 
-## Install via Docker
+On Debian/Ubuntu/Fedora, it also installs Docker. On macOS and WSL, Docker must already be installed and running.
 
-Install Omaterm via Docker on every other platform:
+You'll be dropped straight into the Docker setup. You can always return to your Omaterm by calling `omaterm` from the terminal.
+
+## Run manually
 
 ```bash
 docker run -it --name omaterm --net host -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/omacom-io/omaterm
