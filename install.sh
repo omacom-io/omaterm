@@ -21,14 +21,22 @@ is_arch() {
 }
 
 install_natively_on_arch() {
-  local answer
+  local answer=""
 
   if ! is_arch; then
     return 1
   fi
 
-  read -r -p "Install natively or via Docker? [N/d] " answer </dev/tty
-  [[ ! "$answer" =~ ^[Dd]([Oo][Cc][Kk][Ee][Rr])?$ ]]
+  if [ -r /dev/tty ]; then
+    read -r -p "Install natively or via Docker? [N/d] " answer </dev/tty || true
+  else
+    read -r -p "Install natively or via Docker? [N/d] " answer || true
+  fi
+
+  case "$answer" in
+    [Dd] | [Dd][Oo][Cc][Kk][Ee][Rr]) return 1 ;;
+    *) return 0 ;;
+  esac
 }
 
 run_installer() {
