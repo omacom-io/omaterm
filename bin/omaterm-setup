@@ -3,6 +3,7 @@ set -euo pipefail
 
 MARKER="$HOME/.omaterm-setup-done"
 TAILSCALE_HOSTNAME_FILE="/etc/omaterm-tailscale-hostname"
+GITHUB_TOKEN_URL="https://github.com/settings/tokens/new?description=Omaterm&scopes=repo,read:org,gist,write:packages"
 
 if [ -f "$MARKER" ]; then
   exit 0
@@ -34,7 +35,19 @@ setup_git_identity() {
 
 setup_gh_authentication() {
   if ! gh auth status &>/dev/null && gum confirm "Authenticate with GitHub?"; then
-    gh auth login || return 1
+    local github_token
+
+    echo
+    echo "Use classic token with repo, read:org, gist, and write:packages scopes:"
+    echo "$GITHUB_TOKEN_URL"
+    echo
+
+    while [ -z "${github_token:-}" ]; do
+      github_token="$(gum input --password --prompt "GitHub token: ")"
+    done
+
+    printf '%s' "$github_token" | gh auth login --hostname github.com --with-token || return 1
+    gh auth setup-git || return 1
     echo "✓ GitHub"
     echo
   fi
