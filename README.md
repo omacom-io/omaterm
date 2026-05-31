@@ -67,3 +67,22 @@ omaterm rm -a
 ```
 
 The named container persists its filesystem across starts, including home directory state, installed packages, git config, shell history, and projects. Remove the Omaterm container with `docker rm omaterm` when you want to reset its shell environment. Omaterm uses host networking so services published to host localhost by containers are reachable from inside Omaterm. Use `omaterm new NAME -d` to mount the host Docker engine through `/var/run/docker.sock`.
+
+## Resource limits
+
+So several Omaterms can share one machine without starving the host or each other, every Omaterm is launched with CPU and memory limits, re-divided automatically whenever one is created or removed:
+
+- **Host reserve**: one core and 2 GB of RAM are kept for the host so it stays responsive under load.
+- **CPU (shared)**: all Omaterms are pinned to the remaining cores with equal `cpu-shares`. A lone Omaterm gets every non-reserved core; when several run at once the kernel splits them fairly, and rebalances live as runs finish.
+- **Memory (partitioned)**: the remaining RAM is hard-split evenly across all Omaterms (`(TOTAL_RAM - 2 GB) / count`), with swap disabled, so one Omaterm can't drag the whole machine into swap or OOM the others.
+
+Tune or disable the limits with environment variables:
+
+```bash
+OMATERM_HOST_RESERVE_CORES=2 omaterm new ci   # reserve 2 cores for the host
+OMATERM_HOST_RESERVE_RAM_MB=4096 omaterm new ci  # reserve 4 GB for the host
+OMATERM_CPU_SHARES=512 omaterm new ci         # give this layout a different weight
+OMATERM_NO_LIMITS=1 omaterm new ci            # opt out of limits entirely
+```
+
+CPU and memory limits set this way can also be adjusted on a running Omaterm with `docker update`; environment variables baked into a container (such as the setup token) cannot.

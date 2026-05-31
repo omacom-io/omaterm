@@ -79,7 +79,18 @@ if [[ ${1:-} == "inspect" && ${2:-} == "-f" ]]; then
   exit 0
 fi
 
+# Record the action, then drop removed containers so omaterm_names reflects it.
 printf '%s\n' "$*" >>"$TEST_TMP/docker-actions"
+
+if [[ ${1:-} == "rm" ]]; then
+  shift
+  [[ ${1:-} == "-f" ]] && shift
+  for target in "$@"; do
+    grep -v "^$target:" "$TEST_CONTAINERS" >"$TEST_CONTAINERS.tmp" 2>/dev/null || true
+    mv "$TEST_CONTAINERS.tmp" "$TEST_CONTAINERS"
+  done
+fi
+
 exit 0
 SH
   chmod +x "$TEST_BIN/docker"
@@ -95,8 +106,15 @@ SH
 }
 
 run_omaterm() {
-  PATH="$TEST_BIN:$PATH" OMATERM_IMAGE="omaterm:test" "$SCRIPT" "$@" >"$TEST_TMP/output" 2>&1
+  PATH="$TEST_BIN:$PATH" OMATERM_IMAGE="omaterm:test" \
+    OMATERM_TOTAL_CORES="${OMATERM_TOTAL_CORES:-20}" \
+    OMATERM_TOTAL_RAM_MB="${OMATERM_TOTAL_RAM_MB:-65536}" \
+    "$SCRIPT" "$@" >"$TEST_TMP/output" 2>&1
 }
+
+# With 20 cores / 65536 MB and the 1-core / 2048 MB host reserve, a lone
+# Omaterm is pinned to cores 1-19 and capped at (65536 - 2048) MB.
+LIMITS_ONE="--cpuset-cpus 1-19 --cpu-shares 1024 --memory 63488m --memory-swap 63488m"
 
 test_default_creates_omaterm() {
   new_env
@@ -104,7 +122,7 @@ test_default_creates_omaterm() {
 
   run_omaterm
 
-  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name omaterm --label omaterm=1 --net host omaterm:test" "default command creates omaterm"
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name omaterm --label omaterm=1 --net host $LIMITS_ONE omaterm:test" "default command creates omaterm"
   assert_file_not_contains "$TEST_TMP/docker-actions" "/var/run/docker.sock" "default command does not mount host Docker"
   pass "default creates omaterm"
 }
@@ -126,7 +144,7 @@ test_new_mounts_docker_with_d() {
 
   run_omaterm new omaterm2 -d
 
-  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name omaterm2 --label omaterm=1 --net host -v /var/run/docker.sock:/var/run/docker.sock omaterm:test" "new -d mounts host Docker"
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name omaterm2 --label omaterm=1 --net host $LIMITS_ONE -v /var/run/docker.sock:/var/run/docker.sock omaterm:test" "new -d mounts host Docker"
   pass "new mounts Docker with -d"
 }
 
@@ -214,6 +232,60 @@ test_rm_all() {
   pass "rm all"
 }
 
+test_new_rebalances_existing() {
+  new_env
+  write_docker
+  printf 'omaterm:false:1\nomaterm2:false:1\n' >"$TEST_CONTAINERS"
+
+  run_omaterm new omaterm3
+
+  # (65536 - 2048) / 3 Omaterms = 21162 MB each.
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name omaterm3 --label omaterm=1 --net host --cpuset-cpus 1-19 --cpu-shares 1024 --memory 21162m --memory-swap 21162m omaterm:test" "new claims its divided share"
+  assert_file_contains "$TEST_TMP/docker-actions" "update --cpuset-cpus 1-19 --cpu-shares 1024 --memory 21162m --memory-swap 21162m omaterm2" "new re-divides existing Omaterm memory"
+  pass "new rebalances existing"
+}
+
+test_rm_rebalances_remaining() {
+  new_env
+  write_docker
+  printf 'omaterm:false:1\nomaterm2:false:1\nomaterm3:false:1\n' >"$TEST_CONTAINERS"
+
+  run_omaterm rm omaterm3
+
+  # Survivors split (65536 - 2048) / 2 = 31744 MB each.
+  assert_file_contains "$TEST_TMP/docker-actions" "update --cpuset-cpus 1-19 --cpu-shares 1024 --memory 31744m --memory-swap 31744m omaterm2" "rm grows survivors' memory share"
+  pass "rm rebalances remaining"
+}
+
+test_no_limits_opts_out() {
+  new_env
+  write_docker
+
+  (
+    export OMATERM_NO_LIMITS=1
+    run_omaterm
+  )
+
+  assert_file_not_contains "$TEST_TMP/docker-actions" "--cpuset-cpus" "no-limits omits cpuset"
+  assert_file_not_contains "$TEST_TMP/docker-actions" "--memory" "no-limits omits memory cap"
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name omaterm --label omaterm=1 --net host omaterm:test" "no-limits runs without resource flags"
+  pass "no-limits opts out"
+}
+
+test_reserve_overrides() {
+  new_env
+  write_docker
+
+  (
+    export OMATERM_HOST_RESERVE_CORES=2 OMATERM_HOST_RESERVE_RAM_MB=4096
+    run_omaterm
+  )
+
+  # Reserve 2 cores (cpuset 2-19) and 4096 MB ((65536 - 4096) = 61440 MB).
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name omaterm --label omaterm=1 --net host --cpuset-cpus 2-19 --cpu-shares 1024 --memory 61440m --memory-swap 61440m omaterm:test" "host reserve is configurable"
+  pass "reserve overrides"
+}
+
 main() {
   test_default_creates_omaterm
   test_new_with_setup_token
@@ -225,6 +297,10 @@ main() {
   test_rm_default
   test_rm_named
   test_rm_all
+  test_new_rebalances_existing
+  test_rm_rebalances_remaining
+  test_no_limits_opts_out
+  test_reserve_overrides
 }
 
 main "$@"

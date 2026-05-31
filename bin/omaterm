@@ -5,6 +5,16 @@ IMAGE="${OMATERM_IMAGE:-ghcr.io/omacom-io/omaterm}"
 DEFAULT_NAME="omaterm"
 LABEL="omaterm=1"
 
+# Resource limits. The host keeps a reserved slice for itself; the rest is
+# divided across all Omaterms. CPU is shared dynamically with cpu-shares over
+# the cores not reserved for the host (full box when one runs alone, fair split
+# under contention). Memory is hard-partitioned evenly by Omaterm count, since
+# memory can't degrade gracefully the way CPU does. Set OMATERM_NO_LIMITS=1 to
+# opt out entirely.
+HOST_RESERVE_CORES="${OMATERM_HOST_RESERVE_CORES:-1}"
+HOST_RESERVE_RAM_MB="${OMATERM_HOST_RESERVE_RAM_MB:-2048}"
+CPU_SHARES="${OMATERM_CPU_SHARES:-1024}"
+
 usage() {
   cat >&2 <<'EOF'
 Usage:
@@ -50,6 +60,86 @@ container_running() {
   [[ "$(docker inspect -f '{{.State.Running}}' "$1")" == "true" ]]
 }
 
+host_core_count() {
+  echo "${OMATERM_TOTAL_CORES:-$(nproc 2>/dev/null || echo 0)}"
+}
+
+host_total_ram_mb() {
+  if [[ -n ${OMATERM_TOTAL_RAM_MB:-} ]]; then
+    echo "$OMATERM_TOTAL_RAM_MB"
+    return
+  fi
+
+  awk '/^MemTotal:/ { printf "%d", $2 / 1024; ok = 1 } END { if (!ok) print 0 }' /proc/meminfo 2>/dev/null || echo 0
+}
+
+# CPU set reserving the first HOST_RESERVE_CORES cores for the host. Fails (and
+# prints nothing) when there aren't enough cores to leave the host its reserve.
+omaterm_cpuset() {
+  local cores
+  cores="$(host_core_count)"
+
+  if ((cores - HOST_RESERVE_CORES < 1)); then
+    return 1
+  fi
+
+  printf '%d-%d' "$HOST_RESERVE_CORES" "$((cores - 1))"
+}
+
+# Per-Omaterm memory in MB once the host reserve is divided across `count`
+# Omaterms. Fails when the reserve leaves nothing to share.
+omaterm_mem_mb() {
+  local count="$1" avail
+  avail="$(($(host_total_ram_mb) - HOST_RESERVE_RAM_MB))"
+
+  if ((count < 1 || avail < 1)); then
+    return 1
+  fi
+
+  printf '%d' "$((avail / count))"
+}
+
+# Fill the global LIMIT_ARGS array with docker resource flags for a layout of
+# `count` Omaterms.
+build_limit_args() {
+  local count="$1" cpuset mem
+  LIMIT_ARGS=()
+
+  if [[ -n ${OMATERM_NO_LIMITS:-} ]]; then
+    return
+  fi
+
+  if cpuset="$(omaterm_cpuset)"; then
+    LIMIT_ARGS+=(--cpuset-cpus "$cpuset")
+  fi
+
+  LIMIT_ARGS+=(--cpu-shares "$CPU_SHARES")
+
+  if mem="$(omaterm_mem_mb "$count")"; then
+    LIMIT_ARGS+=(--memory "${mem}m" --memory-swap "${mem}m")
+  fi
+}
+
+# Re-divide host resources across every existing Omaterm for a total of `count`.
+rebalance_limits() {
+  local count="$1" name mem names
+
+  build_limit_args "$count"
+  ((${#LIMIT_ARGS[@]})) || return 0
+
+  mapfile -t names < <(omaterm_names)
+  ((${#names[@]})) || return 0
+
+  if mem="$(omaterm_mem_mb "$count")"; then
+    echo "==> Dividing host resources across $count Omaterm(s): ${mem}m memory each" >&2
+  fi
+
+  for name in "${names[@]}"; do
+    docker update "${LIMIT_ARGS[@]}" "$name" >/dev/null 2>&1 ||
+      echo "Warning: could not apply resource limits to $name" >&2
+  done
+}
+
 choose_omaterm() {
   local action="$1"
   shift
@@ -91,7 +181,7 @@ choose_omaterm() {
 
 run_new() {
   local name="$1" setup_token="" tailscale_hostname="" mount_docker=0
-  local docker_args=() env_args=()
+  local docker_args=() env_args=() existing
   shift
 
   while (($#)); do
@@ -130,6 +220,12 @@ run_new() {
     exit 1
   fi
 
+  # Adding this Omaterm shrinks every existing Omaterm's memory share; re-divide
+  # them before launching, then claim the same share for the new one.
+  mapfile -t existing < <(omaterm_names)
+  rebalance_limits "$((${#existing[@]} + 1))"
+  build_limit_args "$((${#existing[@]} + 1))"
+
   if [ -t 0 ] && [ -r /dev/tty ]; then
     exec </dev/tty
   fi
@@ -146,6 +242,7 @@ run_new() {
     --name "$name" \
     --label "$LABEL" \
     --net host \
+    "${LIMIT_ARGS[@]}" \
     "${docker_args[@]}" \
     "$IMAGE"
 }
@@ -160,6 +257,8 @@ run_start() {
   fi
 
   name="$(choose_omaterm "Start" "${names[@]}")"
+
+  rebalance_limits "${#names[@]}"
 
   if container_running "$name"; then
     exec docker attach "$name"
@@ -203,6 +302,10 @@ run_rm() {
   fi
 
   docker rm -f "$name"
+
+  # One fewer Omaterm means a larger memory share for the survivors.
+  mapfile -t names < <(omaterm_names)
+  rebalance_limits "${#names[@]}"
 }
 
 case "${1:-}" in
