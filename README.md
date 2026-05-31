@@ -46,7 +46,7 @@ OMATERM_SETUP_TOKEN=... OMATERM_TS_HOSTNAME=my-omaterm omaterm
 omaterm new omaterm2 -t ... -h my-omaterm
 ```
 
-If no environment variable is present, setup starts the normal interactive questions. Press Ctrl+C at a setup prompt to enter a setup token. Press Ctrl+C again at the token prompt to skip the rest of setup without printing a new token.
+If no environment variable is present, setup starts the normal interactive questions. Press Ctrl+C at a setup prompt to skip the rest of setup.
 For Docker installs, the token is applied when the container is first created; an existing `omaterm` container keeps its original environment.
 
 ## Run manually

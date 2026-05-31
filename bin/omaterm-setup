@@ -19,19 +19,10 @@ SETUP_UNATTENDED=0
 SETUP_SECTION_FAILED=0
 SETUP_FINISHED=0
 SETUP_IN_PROGRESS=0
-SETUP_SKIP_TOKEN_COPY=0
 
 if [[ -f $SETUP_DONE_MARKER ]]; then
   exit 0
 fi
-
-finish_from_interrupt_or_prompt_token() {
-  if (( SETUP_IN_PROGRESS )); then
-    SETUP_FINISHED=1
-  else
-    prompt_setup_token || true
-  fi
-}
 
 banner() {
   clear
@@ -111,32 +102,6 @@ apply_setup_token() {
   fi
 }
 
-prompt_setup_token() {
-  local encoded status
-
-  SETUP_SKIP_TOKEN_COPY=1
-
-  banner
-  echo "Paste Omaterm setup token (or press Ctrl+C to skip setup)."
-  echo
-
-  set +e
-  trap : INT
-  encoded="$(gum input --password --char-limit=0)"
-  status=$?
-  trap - INT
-  set -e
-
-  if (( status != 0 )); then
-    SETUP_FINISHED=1
-    return 0
-  fi
-
-  decode_setup_token "$encoded" || return 1
-  run_setup_section "Setup token" apply_setup_token
-  SETUP_FINISHED=1
-}
-
 gum_confirm() {
   local status
 
@@ -148,7 +113,7 @@ gum_confirm() {
   set -e
 
   if (( status == 130 )); then
-    finish_from_interrupt_or_prompt_token
+    SETUP_FINISHED=1
   fi
 
   return "$status"
@@ -224,7 +189,7 @@ run_setup_helper() {
   rm -f "$output_file"
 
   if (( status == 130 )); then
-    finish_from_interrupt_or_prompt_token
+    SETUP_FINISHED=1
     return 1
   elif (( status != 0 )); then
     return 1
@@ -292,7 +257,7 @@ finish_setup() {
   if (( SETUP_UNATTENDED )); then
     return
   elif [ -t 0 ] && [ -r /dev/tty ]; then
-    if (( SETUP_IN_PROGRESS && ! SETUP_SKIP_TOKEN_COPY )); then
+    if (( SETUP_IN_PROGRESS )); then
       prompt_copy_setup_token
     fi
     gum spin --spinner "globe" --title "Setup complete. Press any key to tmux..." -- bash -c 'read -n 1 -s </dev/tty'

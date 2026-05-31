@@ -285,7 +285,7 @@ SH
   pass "interactive env token does not copy setup token"
 }
 
-test_ctrl_c_token_prompt_finishes_setup() {
+test_ctrl_c_skips_setup() {
   new_env
   write_common_fakes
   write_gum <<'SH'
@@ -301,11 +301,12 @@ SH
 
   run_setup
 
-  [[ -f "$TEST_HOME/.local/state/omaterm/setup-done" ]] || fail "ctrl-c token prompt writes setup marker"
-  assert_file_not_contains "$TEST_TMP/gum-calls" "Authenticate with GitHub?" "ctrl-c token prompt skips later questions"
-  assert_file_not_contains "$TEST_TMP/gum-calls" "Copy setup token" "ctrl-c token prompt does not offer to copy a new token"
-  assert_file_contains "$TEST_TMP/output" "Setup complete" "ctrl-c token prompt finishes setup"
-  pass "ctrl-c on setup token prompt finishes setup"
+  [[ -f "$TEST_HOME/.local/state/omaterm/setup-done" ]] || fail "ctrl-c writes setup marker"
+  assert_file_not_contains "$TEST_TMP/gum-calls" "Authenticate with GitHub?" "ctrl-c skips later questions"
+  assert_file_not_contains "$TEST_TMP/gum-calls" "Copy setup token" "ctrl-c without manual input does not offer to copy a new token"
+  assert_file_not_contains "$TEST_TMP/output" "Paste Omaterm setup token" "ctrl-c does not prompt for setup token"
+  assert_file_contains "$TEST_TMP/output" "Setup complete" "ctrl-c finishes setup"
+  pass "ctrl-c skips setup"
 }
 
 test_ctrl_c_after_manual_progress_finishes_setup() {
@@ -331,7 +332,7 @@ SH
 
   [[ -f "$TEST_HOME/.local/state/omaterm/setup-done" ]] || fail "ctrl-c after manual progress writes setup marker"
   assert_file_not_contains "$TEST_TMP/gum-calls" "Authenticate with GitHub?" "ctrl-c after manual progress skips later questions"
-  assert_file_not_contains "$TEST_TMP/gum-calls" "Paste Omaterm setup token" "ctrl-c after manual progress does not restart token flow"
+  assert_file_not_contains "$TEST_TMP/output" "Paste Omaterm setup token" "ctrl-c after manual progress does not prompt for setup token"
   pass "ctrl-c after manual progress finishes setup"
 }
 
@@ -361,7 +362,7 @@ SH
   run_setup
 
   [[ -f "$TEST_HOME/.local/state/omaterm/setup-done" ]] || fail "ctrl-c after tailscale hostname writes setup marker"
-  assert_file_not_contains "$TEST_TMP/gum-calls" "Paste Omaterm setup token" "ctrl-c after tailscale hostname does not restart token flow"
+  assert_file_not_contains "$TEST_TMP/output" "Paste Omaterm setup token" "ctrl-c after tailscale hostname does not prompt for setup token"
   assert_file_contains "$TEST_TMP/output" "Setup complete" "ctrl-c after tailscale hostname finishes setup"
   pass "ctrl-c after tailscale hostname finishes setup"
 }
@@ -586,7 +587,7 @@ main() {
   test_env_token_unattended
   test_env_token_missing_tailscale_applies_rest
   test_env_token_interactive_does_not_copy_token
-  test_ctrl_c_token_prompt_finishes_setup
+  test_ctrl_c_skips_setup
   test_ctrl_c_after_manual_progress_finishes_setup
   test_ctrl_c_after_tailscale_hostname_finishes_setup
   test_git_manual_uses_helper
