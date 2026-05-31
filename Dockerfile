@@ -43,9 +43,8 @@ RUN --mount=type=secret,id=GITHUB_TOKEN,required=true,uid=1000,gid=1000 \
     github_token="$(cat /run/secrets/GITHUB_TOKEN)" && \
     export GITHUB_TOKEN="$github_token" GH_TOKEN="$github_token" && \
     eval "$(mise activate bash)" && \
-    mise settings set jobs 1 && \
     mise settings set idiomatic_version_file_enable_tools ruby && \
-    mise use -g -y --jobs=1 $(grep -vE '^[[:space:]]*(#|$)' /tmp/mise.packages) && \
+    mise use -g -y $(grep -vE '^[[:space:]]*(#|$)' /tmp/mise.packages) && \
     (gpgconf --kill all || true) && \
     rm -rf /home/omaterm/.gnupg
 
