@@ -69,7 +69,6 @@ OMATERM_ENV=(
   LOGNAME=omaterm
   SHELL=/bin/bash
   TERM="${TERM:-xterm-256color}"
-  OMATERM_DOCKER=1
   PATH="/home/omaterm/.local/share/mise/shims:/home/omaterm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin"
 )
 

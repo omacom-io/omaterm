@@ -64,23 +64,8 @@ gum_input_into() {
   fi
 }
 
-start_tailscaled() {
-  if [[ ${OMATERM_DOCKER:-} == 1 || -f /.dockerenv ]]; then
-    return
-  elif systemctl cat tailscaled.service &>/dev/null; then
-    sudo systemctl daemon-reload || return 1
-    sudo systemctl enable --now tailscaled.service || return 1
-  else
-    sudo sh -c 'tailscaled >/tmp/tailscaled.log 2>&1 &' || return 1
-  fi
-}
-
 tailscale_up() {
-  if [[ ${OMATERM_DOCKER:-} == 1 || -f /.dockerenv ]]; then
-    sudo -n tailscale up "$@" || return 1
-  else
-    sudo tailscale up "$@" || return 1
-  fi
+  sudo -n tailscale up "$@" || return 1
 }
 
 prompt_hostname() {
@@ -127,9 +112,6 @@ setup_tailscale() {
     return 0
   fi
 
-  echo
-  echo "Starting Tailscale..."
-  start_tailscaled || return 1
   prompt_hostname tailnet_hostname || return 1
   [[ -n $tailnet_hostname ]] || return 1
 

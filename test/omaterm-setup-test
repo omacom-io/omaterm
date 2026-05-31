@@ -140,11 +140,6 @@ case "$1 ${2:-}" in
 esac
 SH
 
-  cat >"$TEST_BIN/systemctl" <<'SH'
-#!/usr/bin/env bash
-exit 1
-SH
-
   chmod +x "$TEST_BIN"/*
 }
 
@@ -191,7 +186,6 @@ run_setup() {
   set +e
   HOME="$TEST_HOME" \
     PATH="$TEST_BIN:$ROOT/bin:$PATH" \
-    OMATERM_DOCKER=1 \
     "$SCRIPT" >"$TEST_TMP/output" 2>&1
   status=$?
   set -e
@@ -215,7 +209,6 @@ SH
     OMATERM_TS_HOSTNAME="token-host" \
     HOME="$TEST_HOME" \
     PATH="$TEST_BIN:$ROOT/bin:$PATH" \
-    OMATERM_DOCKER=1 \
     "$SCRIPT" >"$TEST_TMP/output" 2>&1
 
   [[ ! -s "$TEST_TMP/gum-calls" ]] || fail "env token should not prompt"
@@ -224,7 +217,7 @@ SH
   assert_file_contains "$TEST_TMP/output" "✓ Git" "env token delegates git setup"
   assert_equals "ghp_token" "$(cat "$TEST_TMP/gh-token")" "env token logs into gh"
   assert_file_contains "$TEST_TMP/output" "✓ GitHub" "env token delegates github setup"
-  assert_file_contains "$TEST_TMP/sudo-calls" "-n tailscale up --ssh --accept-routes --hostname=token-host --auth-key=tskey-token" "env token uses non-interactive sudo for docker tailscale"
+  assert_file_contains "$TEST_TMP/sudo-calls" "-n tailscale up --ssh --accept-routes --hostname=token-host --auth-key=tskey-token" "env token uses non-interactive sudo for tailscale"
   assert_file_contains "$TEST_TMP/tailscale-calls" "up --ssh --accept-routes --hostname=token-host --auth-key=tskey-token" "env token brings up tailscale with provided hostname"
   assert_equals "token-host" "$(cat "$TEST_HOME/.local/state/omaterm/tailscale-hostname")" "tailscale hostname stored in user state"
   assert_equals "ssh-ed25519 TOKENKEY token" "$(cat "$TEST_HOME/.ssh/authorized_keys")" "env token installs ssh key"
@@ -248,7 +241,6 @@ SH
     OMATERM_TS_HOSTNAME="token-host" \
     HOME="$TEST_HOME" \
     PATH="$TEST_BIN:$ROOT/bin:$PATH" \
-    OMATERM_DOCKER=1 \
     "$SCRIPT" >"$TEST_TMP/output" 2>&1
 
   [[ ! -s "$TEST_TMP/gum-calls" ]] || fail "missing tailscale env token should not prompt"
@@ -276,7 +268,6 @@ SH
   OMATERM_SETUP_TOKEN="$(setup_token_without_tailscale)" \
     HOME="$TEST_HOME" \
     PATH="$TEST_BIN:$ROOT/bin:$PATH" \
-    OMATERM_DOCKER=1 \
     script -qfec "$SCRIPT" "$TEST_TMP/typescript" >/dev/null 2>&1
 
   [[ -f "$TEST_HOME/.local/state/omaterm/setup-done" ]] || fail "interactive env token writes setup marker"
@@ -303,7 +294,6 @@ SH
   OMATERM_SETUP_TOKEN="$(setup_token)" \
     HOME="$TEST_HOME" \
     PATH="$TEST_BIN:$ROOT/bin:$PATH" \
-    OMATERM_DOCKER=1 \
     script -qfec "$SCRIPT" "$TEST_TMP/typescript" >/dev/null 2>&1
 
   assert_file_contains "$TEST_TMP/gum-calls" "Tailnet hostname" "env token prompts for missing tailscale hostname"
@@ -472,7 +462,7 @@ SH
   run_setup
 
   assert_file_contains "$TEST_TMP/gum-calls" "Tailscale auth key" "tailscale auth key is required"
-  assert_file_contains "$TEST_TMP/sudo-calls" "-n tailscale up --ssh --accept-routes --hostname=manual-host --auth-key=tskey-manual" "manual tailscale uses non-interactive sudo in docker"
+  assert_file_contains "$TEST_TMP/sudo-calls" "-n tailscale up --ssh --accept-routes --hostname=manual-host --auth-key=tskey-manual" "manual tailscale uses non-interactive sudo"
   assert_file_contains "$TEST_TMP/tailscale-calls" "up --ssh --accept-routes --hostname=manual-host --auth-key=tskey-manual" "manual tailscale uses auth key"
   assert_equals "manual-host" "$(cat "$TEST_HOME/.local/state/omaterm/tailscale-hostname")" "manual tailscale hostname stored in user state"
   assert_file_not_contains "$TEST_TMP/sudo-calls" "tee" "tailscale hostname storage does not use sudo"
@@ -610,7 +600,7 @@ case "$1" in
 esac
 SH
 
-  HOME="$TEST_HOME" PATH="$TEST_BIN:$ROOT/bin:$PATH" OMATERM_DOCKER=1 script -qfec "$SCRIPT" "$TEST_TMP/typescript" >/dev/null 2>&1 || true
+  HOME="$TEST_HOME" PATH="$TEST_BIN:$ROOT/bin:$PATH" script -qfec "$SCRIPT" "$TEST_TMP/typescript" >/dev/null 2>&1 || true
 
   assert_file_contains "$TEST_TMP/op-calls" "account add --address my.1password.com --email me@example.com --secret-key A3-SECRET --signin --shorthand my" "full account path adds account with details"
   assert_equals "super-secret-password" "$(cat "$TEST_TMP/op-password")" "full account password is piped to op"

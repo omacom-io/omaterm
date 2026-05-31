@@ -17,8 +17,6 @@ RUN useradd -m -u 1000 -s /bin/bash omaterm && \
 USER omaterm
 WORKDIR /home/omaterm
 ENV SHELL=/bin/bash
-ENV OMATERM_DOCKER=1
-
 # Install omadots
 RUN curl -fsSL https://raw.githubusercontent.com/omacom-io/omadots/refs/heads/master/install.sh | bash
 

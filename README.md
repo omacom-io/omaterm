@@ -11,17 +11,17 @@ An Omakase Terminal Setup by DHH. Think of it as a headless [Omarchy](https://om
 - **Networking**: SSH, tailscale
 - **Git**: Interactive config for user name/email, helpful aliases
 
-Core system packages and user-facing tools such as Neovim, tmux, Starship, eza, gum, GitHub CLI, 1Password CLI, lazygit, and lazydocker are installed through Arch packages. The AI tooling is installed through mise after the OS packages are in place.
+Core system packages and user-facing tools such as Neovim, tmux, Starship, eza, gum, GitHub CLI, 1Password CLI, lazygit, and lazydocker are installed through Arch packages inside the Docker image. The AI tooling is installed through mise after the OS packages are in place.
 
 ## Install
 
-This installs Omaterm via Docker (or offers to install natively on Arch).
+This installs Omaterm via Docker.
 
 ```bash
 curl -fsSL https://omaterm.org/install | bash
 ```
 
-On Debian/Ubuntu/Fedora, it also installs Docker. On WSL, Docker Desktop with WSL integration must already be installed and running.
+On Arch, Debian/Ubuntu, and Fedora, it also installs and enables Docker. On WSL, Docker Desktop with WSL integration must already be installed and running.
 
 You'll be dropped straight into the Docker setup. You can always return to your Omaterm by calling `omaterm` from the terminal.
 
@@ -47,12 +47,12 @@ omaterm new omaterm2 -t ... -h my-omaterm
 ```
 
 If no environment variable is present, setup starts the normal interactive questions. Press Ctrl+C at a setup prompt to skip the rest of setup.
-For Docker installs, the token is applied when the container is first created; an existing `omaterm` container keeps its original environment.
+The token is applied when the container is first created; an existing `omaterm` container keeps its original environment.
 
 ## Run manually
 
 ```bash
-docker run -it --name omaterm --net host -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/omacom-io/omaterm
+docker run -it --name omaterm --label omaterm=1 --net host ghcr.io/omacom-io/omaterm
 ```
 
 Then use the installed `omaterm` command to reconnect, create additional named Omaterms, or remove one:

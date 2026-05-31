@@ -30,6 +30,10 @@ if grep -qF 'omaterm-tailscale' "$ENTRYPOINT"; then
   fail "entrypoint should not add a separate tailscale sudoers rule"
 fi
 
+if grep -qF 'OMATERM_DOCKER' "$ENTRYPOINT" "$DOCKERFILE" "$ROOT/bin/omaterm-setup-tailscale"; then
+  fail "Docker-only setup should not need a native-vs-Docker mode flag"
+fi
+
 grep -qF 'start_tailscaled' "$ENTRYPOINT" ||
   fail "entrypoint should start tailscaled before setup"
 

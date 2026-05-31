@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+INSTALL="$ROOT/install.sh"
+NATIVE_INSTALL="$ROOT/install-native.sh"
+
+fail() {
+  echo "not ok - $1" >&2
+  exit 1
+}
+
+pass() {
+  echo "ok - $1"
+}
+
+[[ ! -e $NATIVE_INSTALL ]] ||
+  fail "native installer should not exist"
+
+grep -qF 'run_installer install-docker.sh' "$INSTALL" ||
+  fail "top-level installer should delegate to Docker installer"
+
+if grep -qE 'install-native|Install natively|/etc/arch-release' "$INSTALL"; then
+  fail "top-level installer should not branch to native install"
+fi
+
+pass "installer is Docker-only"
