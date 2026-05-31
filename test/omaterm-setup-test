@@ -309,6 +309,27 @@ SH
   pass "ctrl-c skips setup"
 }
 
+test_confirm_interrupt_status_skips_setup() {
+  new_env
+  write_common_fakes
+  write_gum <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TMP/gum-calls"
+case "${1:-}" in
+  confirm) exit 2 ;;
+  spin) echo "spin" >>"$TEST_TMP/spin-calls"; exit 0 ;;
+  *) exit 0 ;;
+esac
+SH
+
+  run_setup
+
+  [[ -f "$TEST_HOME/.local/state/omaterm/setup-done" ]] || fail "non-130 confirm interrupt writes setup marker"
+  assert_file_not_contains "$TEST_TMP/gum-calls" "Authenticate with GitHub?" "non-130 confirm interrupt skips later questions"
+  assert_file_contains "$TEST_TMP/output" "Setup complete" "non-130 confirm interrupt finishes setup"
+  pass "non-130 confirm interrupt skips setup"
+}
+
 test_ctrl_c_after_manual_progress_finishes_setup() {
   new_env
   write_common_fakes
@@ -322,7 +343,7 @@ printf '%s\n' "$*" >>"$TEST_TMP/gum-calls"
 case "$1:$count" in
   confirm:1) exit 0 ;;
   input:2) printf 'Manual User\n' ;;
-  input:3) exit 130 ;;
+  input:3) exit 1 ;;
   spin:*) echo "spin" >>"$TEST_TMP/spin-calls"; exit 0 ;;
   *) exit 1 ;;
 esac
@@ -350,7 +371,7 @@ case "$1" in
   input)
     case "$*" in
       *"Tailnet hostname"*) printf 'partial-host\n' ;;
-      *"Tailscale auth key"*) exit 130 ;;
+      *"Tailscale auth key"*) exit 1 ;;
       *) printf '\n' ;;
     esac
     ;;
@@ -588,6 +609,7 @@ main() {
   test_env_token_missing_tailscale_applies_rest
   test_env_token_interactive_does_not_copy_token
   test_ctrl_c_skips_setup
+  test_confirm_interrupt_status_skips_setup
   test_ctrl_c_after_manual_progress_finishes_setup
   test_ctrl_c_after_tailscale_hostname_finishes_setup
   test_git_manual_uses_helper

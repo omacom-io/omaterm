@@ -103,17 +103,18 @@ apply_setup_token() {
 }
 
 gum_confirm() {
-  local status
+  local status interrupted=0
 
   set +e
-  trap : INT
+  trap 'interrupted=1' INT
   gum confirm "$@"
   status=$?
   trap - INT
   set -e
 
-  if (( status == 130 )); then
+  if (( interrupted || status == 130 || status > 1 )); then
     SETUP_FINISHED=1
+    return 130
   fi
 
   return "$status"
@@ -129,7 +130,9 @@ prompt_copy_setup_token() {
   trap - INT
   set -e
 
-  (( status == 0 )) && copy_setup_token
+  if (( status == 0 )); then
+    copy_setup_token
+  fi
 }
 
 copy_setup_token() {
@@ -188,7 +191,7 @@ run_setup_helper() {
   (( SETUP_HELPER_MANUAL_PROGRESS )) && SETUP_IN_PROGRESS=1
   rm -f "$output_file"
 
-  if (( status == 130 )); then
+  if (( status == 130 || status > 1 )); then
     SETUP_FINISHED=1
     return 1
   elif (( status != 0 )); then

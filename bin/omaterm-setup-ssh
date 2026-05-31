@@ -55,12 +55,9 @@ gum_input_into() {
   trap - INT
   set -e
 
-  if (( status == 130 )); then
+  if (( status != 0 )); then
     target=""
     finish_from_interrupt
-  elif (( status != 0 )); then
-    target=""
-    return 1
   fi
 
   target="$value"
