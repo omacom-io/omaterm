@@ -9,7 +9,7 @@ RUN printf 'Server = https://mirror.omarchy.org/$repo/os/$arch\n' > /etc/pacman.
     pacman -Syu --needed --noconfirm $(grep -vE '^[[:space:]]*(#|$)' /tmp/arch.packages) && \
     pacman -Scc --noconfirm
 
-# Create a non-root user
+# Create a non-root user with sudoless access
 RUN useradd -m -u 1000 -s /bin/bash omaterm && \
     echo "omaterm ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/omaterm && \
     chmod 0440 /etc/sudoers.d/omaterm
@@ -41,7 +41,6 @@ RUN --mount=type=secret,id=GITHUB_TOKEN,required=true,uid=1000,gid=1000 \
     github_token="$(cat /run/secrets/GITHUB_TOKEN)" && \
     export GITHUB_TOKEN="$github_token" GH_TOKEN="$github_token" && \
     eval "$(mise activate bash)" && \
-    mise settings set idiomatic_version_file_enable_tools ruby && \
     mise use -g -y $(grep -vE '^[[:space:]]*(#|$)' /tmp/mise.packages) && \
     (gpgconf --kill all || true) && \
     rm -rf /home/omaterm/.gnupg
