@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INSTALL="$ROOT/install.sh"
 NATIVE_INSTALL="$ROOT/install-native.sh"
+DOCKER_INSTALL="$ROOT/install-docker.sh"
 
 fail() {
   echo "not ok - $1" >&2
@@ -17,11 +18,17 @@ pass() {
 [[ ! -e $NATIVE_INSTALL ]] ||
   fail "native installer should not exist"
 
-grep -qF 'run_installer install-docker.sh' "$INSTALL" ||
-  fail "top-level installer should delegate to Docker installer"
+[[ ! -e $DOCKER_INSTALL ]] ||
+  fail "separate Docker installer should not exist"
 
-if grep -qE 'install-native|Install natively|/etc/arch-release' "$INSTALL"; then
-  fail "top-level installer should not branch to native install"
+grep -qF 'run_docker_installation' "$INSTALL" ||
+  fail "installer should run Docker installation directly"
+
+grep -qF 'install_docker_packages' "$INSTALL" ||
+  fail "installer should install Docker packages directly"
+
+if grep -qE 'install-native|install-docker|Install natively|run_installer' "$INSTALL"; then
+  fail "installer should not delegate to another installer"
 fi
 
 pass "installer is Docker-only"
