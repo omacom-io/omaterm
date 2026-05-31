@@ -9,7 +9,8 @@ usage() {
   cat >&2 <<'EOF'
 Usage:
   omaterm
-  omaterm new NAME [-t TOKEN] [-h HOSTNAME|--ts-hostname HOSTNAME]
+  omaterm new NAME [-t TOKEN] [-h HOSTNAME]
+  omaterm ls
   omaterm rm [NAME]
 EOF
 }
@@ -103,7 +104,7 @@ run_new() {
         setup_token="${2:-}"
         shift 2
         ;;
-      -h | --ts-hostname)
+      -h)
         [[ -n ${2:-} ]] || {
           usage
           exit 2
@@ -159,6 +160,10 @@ run_start() {
   fi
 }
 
+run_ls() {
+  omaterm_names
+}
+
 run_rm() {
   local names name="${1:-}"
 
@@ -192,6 +197,13 @@ case "${1:-}" in
       exit 2
     }
     run_new "${@:2}"
+    ;;
+  ls)
+    (($# == 1)) || {
+      usage
+      exit 2
+    }
+    run_ls
     ;;
   rm)
     (($# <= 2)) || {

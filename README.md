@@ -60,6 +60,7 @@ Then use the installed `omaterm` command to reconnect, create additional named O
 ```bash
 omaterm
 omaterm new omaterm2
+omaterm ls
 omaterm rm omaterm2
 ```
 

@@ -149,6 +149,21 @@ test_multiple_uses_gum_choice() {
   pass "multiple uses gum choice"
 }
 
+test_ls_lists_omaterms() {
+  new_env
+  write_docker
+  printf 'omaterm:false:1\nomaterm2:false:1\nplain:false:0\n' >"$TEST_CONTAINERS"
+
+  run_omaterm ls
+
+  assert_file_contains "$TEST_TMP/output" "omaterm" "ls includes default omaterm"
+  assert_file_contains "$TEST_TMP/output" "omaterm2" "ls includes second omaterm"
+  if grep -qF plain "$TEST_TMP/output"; then
+    fail "ls should only include labeled omaterms"
+  fi
+  pass "ls lists omaterms"
+}
+
 test_rm_default() {
   new_env
   write_docker
@@ -177,6 +192,7 @@ main() {
   test_default_starts_existing
   test_default_attaches_running
   test_multiple_uses_gum_choice
+  test_ls_lists_omaterms
   test_rm_default
   test_rm_named
 }
