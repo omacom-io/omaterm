@@ -16,6 +16,7 @@ usage() {
   cat >&2 <<'EOF'
 Usage: omaterm-build test|run|push
 
+omaterm-build local builds omaterm:local
 omaterm-build test  builds omaterm:local and runs a disposable container using host Docker and networking
 omaterm-build run   runs omaterm:local without rebuilding
 omaterm-build push  builds and pushes ghcr.io/omacom-io/omaterm:latest
@@ -23,7 +24,7 @@ EOF
 }
 
 case "$COMMAND" in
-  test | run) IMAGE="${OMATERM_IMAGE:-omaterm:local}" ;;
+  local | test | run) IMAGE="${OMATERM_IMAGE:-omaterm:local}" ;;
   push) IMAGE="${OMATERM_IMAGE:-ghcr.io/omacom-io/omaterm:latest}" ;;
   *)
     usage
