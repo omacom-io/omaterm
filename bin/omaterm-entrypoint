@@ -5,6 +5,28 @@ TAILSCALE_STATE="/var/lib/tailscale/tailscaled.state"
 TAILSCALE_SOCKET="/var/run/tailscale/tailscaled.sock"
 HOST_DOCKER_SOCKET="/var/run/docker.sock"
 
+ensure_sudo_password_is_set() {
+  if ! grep -q NOPASSWD /etc/sudoers.d/omaterm 2>/dev/null; then
+    return
+  fi
+
+  if [ ! -t 0 ]; then
+    echo "Error: First-run Docker setup needs an interactive terminal to set the omaterm sudo password."
+    echo "Run with: docker run -it --name omaterm --network host -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/omacom-io/omaterm"
+    exit 1
+  fi
+
+  echo "Set a sudo password for omaterm."
+  until passwd omaterm; do
+    echo "Password setup failed. Try again."
+  done
+
+  printf "omaterm ALL=(ALL) ALL\n" > /etc/sudoers.d/omaterm
+  chmod 0440 /etc/sudoers.d/omaterm
+  echo
+}
+
+
 tailscaled_running() {
   local comm
 
@@ -61,7 +83,7 @@ ensure_host_docker_access() {
   usermod -aG "$group_name" omaterm
 }
 
-/home/omaterm/.local/bin/omaterm-setup-sudopw
+ensure_sudo_password_is_set
 ensure_host_docker_access
 start_tailscaled_if_configured
 
