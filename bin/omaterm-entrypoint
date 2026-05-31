@@ -37,9 +37,8 @@ tailscaled_running() {
   return 1
 }
 
-start_tailscaled_if_configured() {
+start_tailscaled() {
   command -v tailscaled &>/dev/null || return 0
-  [ -e "$TAILSCALE_STATE" ] || return 0
 
   mkdir -p "$(dirname "$TAILSCALE_SOCKET")" "$(dirname "$TAILSCALE_STATE")"
 
@@ -84,8 +83,10 @@ ensure_host_docker_access() {
 }
 
 ensure_sudo_password_is_set
+printf "omaterm ALL=(root) NOPASSWD: /usr/bin/tailscale\n" | tee /etc/sudoers.d/omaterm-tailscale >/dev/null
+chmod 0440 /etc/sudoers.d/omaterm-tailscale
 ensure_host_docker_access
-start_tailscaled_if_configured
+start_tailscaled
 
 OMATERM_ENV=(
   HOME=/home/omaterm
