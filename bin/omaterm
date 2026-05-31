@@ -11,7 +11,7 @@ Usage:
   omaterm
   omaterm new NAME [-t TOKEN] [-h HOSTNAME]
   omaterm ls
-  omaterm rm [NAME]
+  omaterm rm [-a|NAME]
 EOF
 }
 
@@ -167,7 +167,17 @@ run_ls() {
 run_rm() {
   local names name="${1:-}"
 
-  if [[ -n $name ]]; then
+  if [[ $name == "-a" ]]; then
+    mapfile -t names < <(omaterm_names)
+
+    if ((${#names[@]} == 0)); then
+      echo "No Omaterm containers found." >&2
+      exit 1
+    fi
+
+    docker rm -f "${names[@]}"
+    return
+  elif [[ -n $name ]]; then
     validate_name "$name"
     container_exists "$name" || {
       echo "No such Omaterm: $name" >&2

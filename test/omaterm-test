@@ -186,6 +186,17 @@ test_rm_named() {
   pass "rm named"
 }
 
+test_rm_all() {
+  new_env
+  write_docker
+  printf 'omaterm:false:1\nomaterm2:false:1\nplain:false:0\n' >"$TEST_CONTAINERS"
+
+  run_omaterm rm -a
+
+  assert_file_contains "$TEST_TMP/docker-actions" "rm -f omaterm omaterm2" "rm -a removes all labeled omaterms"
+  pass "rm all"
+}
+
 main() {
   test_default_creates_omaterm
   test_new_with_setup_token
@@ -195,6 +206,7 @@ main() {
   test_ls_lists_omaterms
   test_rm_default
   test_rm_named
+  test_rm_all
 }
 
 main "$@"
