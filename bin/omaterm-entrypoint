@@ -75,10 +75,14 @@ OMATERM_ENV=(
   PATH="/home/omaterm/.local/share/mise/shims:/home/omaterm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin"
 )
 
-run_as_omaterm() {
-  runuser -u omaterm -- env "${OMATERM_ENV[@]}" "$@"
-}
+SETUP_ENV=("${OMATERM_ENV[@]}")
+if [ -n "${OMATERM_SETUP_TOKEN:-}" ]; then
+  SETUP_ENV+=(OMATERM_SETUP_TOKEN="$OMATERM_SETUP_TOKEN")
+fi
+if [ -n "${OMATERM_TS_HOSTNAME:-}" ]; then
+  SETUP_ENV+=(OMATERM_TS_HOSTNAME="$OMATERM_TS_HOSTNAME")
+fi
 
-run_as_omaterm /home/omaterm/.local/bin/omaterm-setup
+runuser -u omaterm -- env "${SETUP_ENV[@]}" /home/omaterm/.local/bin/omaterm-setup
 
 exec runuser -u omaterm -- env "${OMATERM_ENV[@]}" bash -l "$@"

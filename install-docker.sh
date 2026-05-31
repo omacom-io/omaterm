@@ -23,14 +23,22 @@ is_wsl() {
 
 docker_run_command() {
   cat <<'EOF'
-if [ -r /dev/tty ]; then
+if [ -t 0 ] && [ -r /dev/tty ]; then
   exec </dev/tty
+fi
+
+docker_env_args=""
+if [ -n "${OMATERM_SETUP_TOKEN:-}" ]; then
+  docker_env_args="-e OMATERM_SETUP_TOKEN=$OMATERM_SETUP_TOKEN"
+fi
+if [ -n "${OMATERM_TS_HOSTNAME:-}" ]; then
+  docker_env_args="$docker_env_args -e OMATERM_TS_HOSTNAME=$OMATERM_TS_HOSTNAME"
 fi
 
 if docker container inspect omaterm >/dev/null 2>&1; then
   exec docker start -ai omaterm
 else
-  exec docker run -it --name omaterm --net host -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/omacom-io/omaterm
+  exec docker run -it $docker_env_args --name omaterm --net host -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/omacom-io/omaterm
 fi
 EOF
 }
@@ -112,10 +120,16 @@ run_docker_installation() {
   install_docker_alias
 
   section "Starting Omaterm..."
-  if is_arch || is_debian || is_fedora; then
-    exec sg docker -c "$(docker_run_command)" </dev/tty
-  else
+  if docker info >/dev/null 2>&1; then
     eval "$(docker_run_command)"
+  elif command -v newgrp &>/dev/null && [ -t 0 ] && [ -r /dev/tty ]; then
+    exec newgrp docker <<EOF
+$(docker_run_command)
+EOF
+  else
+    echo "Docker is installed, but your current shell does not have access yet."
+    echo "Open a new shell, then run: omaterm"
+    exit 1
   fi
 }
 

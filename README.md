@@ -25,6 +25,23 @@ On Debian/Ubuntu/Fedora, it also installs Docker. On WSL, Docker Desktop with WS
 
 You'll be dropped straight into the Docker setup. You can always return to your Omaterm by calling `omaterm` from the terminal.
 
+## Setup token
+
+At the end of first-run setup, Omaterm prints a base64-encoded JSON setup token. Reuse it on another Omaterm with:
+
+```bash
+OMATERM_SETUP_TOKEN=... omaterm
+```
+
+To skip the Tailscale hostname prompt too, pass a unique hostname for the new machine:
+
+```bash
+OMATERM_SETUP_TOKEN=... OMATERM_TS_HOSTNAME=my-omaterm omaterm
+```
+
+If no environment variable is present, setup asks whether you want to enter one before falling back to interactive setup.
+For Docker installs, the token is applied when the container is first created; an existing `omaterm` container keeps its original environment.
+
 ## Run manually
 
 ```bash

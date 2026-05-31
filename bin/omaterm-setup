@@ -5,12 +5,219 @@ MARKER="$HOME/.omaterm-setup-done"
 TAILSCALE_HOSTNAME_FILE="/etc/omaterm-tailscale-hostname"
 GITHUB_TOKEN_URL="https://github.com/settings/tokens/new?description=Omaterm&scopes=repo,read:org,gist,write:packages"
 
+SETUP_JSON=""
+SETUP_GIT_NAME=""
+SETUP_GIT_EMAIL=""
+SETUP_GH_TOKEN=""
+SETUP_TAILSCALE_AUTH_KEY=""
+SETUP_SSH_KEY=""
+SETUP_1PASSWORD_TOKEN=""
+SETUP_TOKEN_FROM_ENV=0
+SETUP_UNATTENDED=0
+SETUP_SECTION_FAILED=0
+
 if [ -f "$MARKER" ]; then
   exit 0
 fi
 
+json_value() {
+  printf '%s' "$SETUP_JSON" | jq -r "$1"
+}
+
+decode_setup_token() {
+  local encoded
+
+  encoded="${OMATERM_SETUP_TOKEN:-}"
+  [ -n "$encoded" ] && SETUP_TOKEN_FROM_ENV=1
+
+  if [ -z "$encoded" ]; then
+    if ! gum confirm "Enter Omaterm setup token?" --default=false --affirmative "Yes" --negative "No"; then
+      return 1
+    fi
+
+    encoded="$(gum input --password --char-limit=0 --prompt "Setup token: ")"
+  fi
+
+  [ -n "$encoded" ] || return 1
+  encoded="${encoded#OMATERM_SETUP_TOKEN=}"
+  encoded="${encoded#export OMATERM_SETUP_TOKEN=}"
+  encoded="${encoded#\"}"
+  encoded="${encoded%\"}"
+  encoded="${encoded#\'}"
+  encoded="${encoded%\'}"
+  encoded="$(printf '%s' "$encoded" | tr -d '[:space:]')"
+
+  if ! SETUP_JSON="$(printf '%s' "$encoded" | base64 -d 2>/dev/null)"; then
+    echo "Invalid setup token: could not decode base64."
+    return 1
+  fi
+
+  if ! printf '%s' "$SETUP_JSON" | jq -e type >/dev/null; then
+    echo "Invalid setup token: decoded value is not JSON."
+    return 1
+  fi
+}
+
+print_setup_token() {
+  local key setup_json setup_token
+
+  setup_json="$(jq -cn \
+    --arg git_name "$SETUP_GIT_NAME" \
+    --arg git_email "$SETUP_GIT_EMAIL" \
+    --arg gh_token "$SETUP_GH_TOKEN" \
+    --arg ts_auth_key "$SETUP_TAILSCALE_AUTH_KEY" \
+    --arg ssh_key "$SETUP_SSH_KEY" \
+    --arg onepassword_token "$SETUP_1PASSWORD_TOKEN" \
+    '{
+      git: {name: $git_name, email: $git_email},
+      github: {token: $gh_token},
+      tailscale: {auth_key: $ts_auth_key},
+      ssh: {public_key: $ssh_key},
+      onepassword: {token: $onepassword_token}
+    }')"
+
+  setup_token="$(printf '%s' "$setup_json" | base64 -w0)"
+
+  echo
+  echo "Omaterm setup token:"
+  echo "$setup_token"
+  echo
+  echo "Use it with: OMATERM_SETUP_TOKEN=$setup_token omaterm"
+
+  if [ -t 0 ] && [ -r /dev/tty ]; then
+    echo
+    read -r -n 1 -p "Press c to copy setup token, or any other key to continue: " key </dev/tty || true
+    echo
+
+    if [[ "${key:-}" =~ ^[Cc]$ ]]; then
+      copy_setup_token "$setup_token"
+    fi
+  fi
+}
+
+copy_setup_token() {
+  local setup_token="$1"
+
+  if command -v wl-copy &>/dev/null; then
+    printf '%s' "$setup_token" | wl-copy
+  elif command -v xclip &>/dev/null; then
+    printf '%s' "$setup_token" | xclip -selection clipboard
+  elif command -v xsel &>/dev/null; then
+    printf '%s' "$setup_token" | xsel --clipboard --input
+  else
+    echo "No clipboard command found. Copy the token manually."
+    return
+  fi
+
+  echo "✓ Copied setup token"
+}
+
+start_tailscaled() {
+  if [ "${OMATERM_DOCKER:-}" = "1" ] || [ -f /.dockerenv ]; then
+    sudo mkdir -p /var/lib/tailscale /var/run/tailscale || return 1
+    sudo rm -f /var/run/tailscale/tailscaled.sock || return 1
+    sudo sh -c 'tailscaled --tun=userspace-networking --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock >/tmp/tailscaled.log 2>&1 &' || return 1
+  elif systemctl cat tailscaled.service &>/dev/null; then
+    sudo systemctl daemon-reload || return 1
+    sudo systemctl enable --now tailscaled.service || return 1
+  else
+    sudo sh -c 'tailscaled >/tmp/tailscaled.log 2>&1 &' || return 1
+  fi
+}
+
+prompt_tailscale_hostname() {
+  local current_name tailnet_hostname
+
+  if [ -n "${OMATERM_TS_HOSTNAME:-}" ]; then
+    if [[ "$OMATERM_TS_HOSTNAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$ ]]; then
+      printf "%s\n" "$OMATERM_TS_HOSTNAME" | sudo tee "$TAILSCALE_HOSTNAME_FILE" >/dev/null || return 1
+      printf '%s\n' "$OMATERM_TS_HOSTNAME"
+      return
+    fi
+
+    echo "Invalid OMATERM_TS_HOSTNAME. Use letters, numbers, and hyphens only, starting with a letter or number." >&2
+    return 1
+  fi
+
+  current_name="$(cat "$TAILSCALE_HOSTNAME_FILE" 2>/dev/null || true)"
+  current_name="${current_name:-$(hostname)}"
+
+  while true; do
+    echo >&2
+    tailnet_hostname="$(gum input --prompt "Tailnet hostname: " --value "$current_name")"
+    tailnet_hostname="${tailnet_hostname:-$current_name}"
+
+    if [[ "$tailnet_hostname" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$ ]]; then
+      printf "%s\n" "$tailnet_hostname" | sudo tee "$TAILSCALE_HOSTNAME_FILE" >/dev/null || return 1
+      printf '%s\n' "$tailnet_hostname"
+      return
+    fi
+
+    echo "Use letters, numbers, and hyphens only, starting with a letter or number." >&2
+  done
+}
+
+install_ssh_key() {
+  local ssh_key="$1"
+
+  [ -n "$ssh_key" ] || return 0
+
+  mkdir -p "$HOME/.ssh" || return 1
+  chmod 700 "$HOME/.ssh" || return 1
+  touch "$HOME/.ssh/authorized_keys" || return 1
+  chmod 600 "$HOME/.ssh/authorized_keys" || return 1
+
+  if grep -qxF "$ssh_key" "$HOME/.ssh/authorized_keys"; then
+    return
+  else
+    echo "$ssh_key" >>"$HOME/.ssh/authorized_keys" || return 1
+  fi
+}
+
+apply_setup_token() {
+  local git_name git_email gh_token ts_auth_key ts_hostname ssh_key op_token
+
+  git_name="$(json_value '.git.name // empty')"
+  git_email="$(json_value '.git.email // empty')"
+  gh_token="$(json_value '.github.token // empty')"
+  ts_auth_key="$(json_value '.tailscale.auth_key // .tailscale.token // empty')"
+  ssh_key="$(json_value '.ssh.public_key // .ssh.key // empty')"
+  op_token="$(json_value '.onepassword.token // .onepassword.session // empty')"
+
+  if [ -n "$git_name" ] && [ -n "$git_email" ]; then
+    git config --global user.name "$git_name" || return 1
+    git config --global user.email "$git_email" || return 1
+    echo "✓ Git"
+  fi
+
+  if [ -n "$gh_token" ] && ! gh auth status &>/dev/null; then
+    printf '%s' "$gh_token" | gh auth login --hostname github.com --with-token || return 1
+    gh auth setup-git || return 1
+    echo "✓ GitHub"
+  fi
+
+  if [ -n "$ts_auth_key" ] && ! tailscale status &>/dev/null; then
+    ts_hostname="$(prompt_tailscale_hostname)" || return 1
+    start_tailscaled || return 1
+    sudo tailscale up --ssh --accept-routes --hostname="$ts_hostname" --auth-key="$ts_auth_key" || return 1
+    echo "✓ Tailscale"
+  fi
+
+  if [ -n "$ssh_key" ]; then
+    install_ssh_key "$ssh_key" || return 1
+    echo "✓ SSH"
+  fi
+
+  if [ -n "$op_token" ]; then
+    export OP_SERVICE_ACCOUNT_TOKEN="$op_token"
+    op whoami &>/dev/null && echo "✓ 1Password"
+  fi
+}
+
 setup_git_identity() {
   if git config --global user.name &>/dev/null && git config --global user.email &>/dev/null; then
+    SETUP_GIT_NAME="$(git config --global user.name)"
+    SETUP_GIT_EMAIL="$(git config --global user.email)"
     return
   fi
 
@@ -28,13 +235,19 @@ setup_git_identity() {
 
     git config --global user.name "$git_name" || return 1
     git config --global user.email "$git_email" || return 1
+    SETUP_GIT_NAME="$git_name"
+    SETUP_GIT_EMAIL="$git_email"
     echo "✓ Git"
     echo
   fi
 }
 
 setup_gh_authentication() {
-  if ! gh auth status &>/dev/null && gum confirm "Authenticate with GitHub?"; then
+  if gh auth status &>/dev/null; then
+    return
+  fi
+
+  if gum confirm "Authenticate with GitHub?"; then
     local github_token
 
     echo
@@ -48,6 +261,7 @@ setup_gh_authentication() {
 
     printf '%s' "$github_token" | gh auth login --hostname github.com --with-token || return 1
     gh auth setup-git || return 1
+    SETUP_GH_TOKEN="$github_token"
     echo "✓ GitHub"
     echo
   fi
@@ -57,89 +271,36 @@ setup_tailscale() {
   tailscale status &>/dev/null && return
 
   if gum confirm "Connect to Tailscale?"; then
-    if [ "${OMATERM_DOCKER:-}" = "1" ] || [ -f /.dockerenv ]; then
-      sudo mkdir -p /var/lib/tailscale /var/run/tailscale || return 1
-      sudo rm -f /var/run/tailscale/tailscaled.sock || return 1
-      sudo sh -c 'tailscaled --tun=userspace-networking --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock >/tmp/tailscaled.log 2>&1 &' || return 1
-    elif systemctl cat tailscaled.service &>/dev/null; then
-      sudo systemctl daemon-reload || return 1
-      sudo systemctl enable --now tailscaled.service || return 1
-    else
-      sudo sh -c 'tailscaled >/tmp/tailscaled.log 2>&1 &' || return 1
-    fi
+    local tailnet_hostname tailscale_auth_key
 
-    local current_name="$(cat "$TAILSCALE_HOSTNAME_FILE" 2>/dev/null || true)"
-    current_name="${current_name:-$(hostname)}"
-
-    while true; do
-      echo
-      local tailnet_hostname="$(gum input --prompt "Tailnet hostname: " --value "$current_name")"
-      tailnet_hostname="${tailnet_hostname:-$current_name}"
-
-      if [[ "$tailnet_hostname" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$ ]]; then
-        printf "%s\n" "$tailnet_hostname" | sudo tee "$TAILSCALE_HOSTNAME_FILE" >/dev/null || return 1
-        break
-      fi
-
-      echo "Use letters, numbers, and hyphens only, starting with a letter or number."
-    done
+    start_tailscaled || return 1
+    tailnet_hostname="$(prompt_tailscale_hostname)" || return 1
+    tailscale_auth_key="$(gum input --password --prompt "Tailscale auth key (optional): ")"
 
     local tailscale_args=(--ssh --accept-routes --hostname="$tailnet_hostname")
+
+    if [ -n "$tailscale_auth_key" ]; then
+      tailscale_args+=(--auth-key="$tailscale_auth_key")
+    fi
 
     echo
     echo "Bringing up Tailscale..."
     sudo tailscale up "${tailscale_args[@]}" || return 1
+    SETUP_TAILSCALE_AUTH_KEY="$tailscale_auth_key"
     echo "✓ Tailscale"
     echo
   fi
 }
 
 setup_ssh_public_key() {
-  local ssh_key
-
-  if gum confirm "Replace password with SSH public key for remote access?"; then
-    mkdir -p "$HOME/.ssh" || return 1
-    chmod 700 "$HOME/.ssh" || return 1
+  if gum confirm "Add SSH public key for remote access?"; then
+    local ssh_key
 
     ssh_key="$(gum input --placeholder "ssh-ed25519 AAAAC3..." --prompt "SSH key: ")"
-    if [ -z "$ssh_key" ]; then
-      return
-    fi
+    [ -n "$ssh_key" ] || return
 
-    touch "$HOME/.ssh/authorized_keys" || return 1
-    chmod 600 "$HOME/.ssh/authorized_keys" || return 1
-
-    if grep -qxF "$ssh_key" "$HOME/.ssh/authorized_keys"; then
-      echo "SSH key already present in authorized_keys."
-    else
-      echo "$ssh_key" >>"$HOME/.ssh/authorized_keys" || return 1
-      echo "SSH key added to authorized_keys."
-    fi
-
-    if sudo sshd -T 2>/dev/null | grep -q '^passwordauthentication no'; then
-      return
-    fi
-
-    if ! gum confirm "Disable password authentication for SSH (key-based auth only)?"; then
-      return
-    fi
-
-    if [ -d /etc/ssh/sshd_config.d ]; then
-      printf 'PasswordAuthentication no\nKbdInteractiveAuthentication no\nPubkeyAuthentication yes\n' |
-        sudo tee /etc/ssh/sshd_config.d/99-omaterm.conf >/dev/null || return 1
-    else
-      sudo sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config || return 1
-      sudo sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config || return 1
-    fi
-
-    # Confirm the effective config actually disabled password auth before reporting success.
-    if ! sudo sshd -T 2>/dev/null | grep -q '^passwordauthentication no'; then
-      echo "Error: password authentication is still enabled in the effective sshd config." >&2
-      echo "Check for overrides in /etc/ssh/sshd_config and /etc/ssh/sshd_config.d/*.conf." >&2
-      return 1
-    fi
-
-    sudo systemctl restart sshd.service || return 1
+    install_ssh_key "$ssh_key" || return 1
+    SETUP_SSH_KEY="$ssh_key"
 
     echo "✓ SSH"
     echo
@@ -153,18 +314,15 @@ setup_1password() {
     local session
 
     if ! op account list --format json 2>/dev/null | jq -e 'length > 0' >/dev/null; then
-      # Enroll the account interactively. Don't capture stdout: with stdout
-      # redirected (as in `eval "$(...)"`) op switches to non-interactive mode
-      # and fails with "missing --address flag" instead of prompting.
       op account add || return 1
     fi
 
-    # `op signin` is the command designed to be eval'd: it prints the session
-    # token as shell exports on stdout while prompting on the tty. Capture it to
-    # a variable so a real failure is detected (eval of an empty string would
-    # otherwise succeed and mask the error).
     session="$(op signin)" || return 1
     eval "$session"
+
+    echo
+    echo "To include 1Password in the setup token, paste a service account token."
+    SETUP_1PASSWORD_TOKEN="$(gum input --password --prompt "1Password token (optional): ")"
 
     echo "✓ 1Password"
     echo
@@ -182,7 +340,21 @@ run_setup_section() {
   echo
   echo "Skipping $label after an error."
   echo
+  SETUP_SECTION_FAILED=1
   return 0
+}
+
+finish_setup() {
+  touch "$MARKER"
+
+  echo
+  if [ "$SETUP_UNATTENDED" = "1" ]; then
+    return
+  elif [ -t 0 ] && [ -r /dev/tty ]; then
+    gum spin --spinner "globe" --title "Setup done! Press any key to tmux..." -- bash -c 'read -n 1 -s </dev/tty'
+  else
+    echo "Setup done!"
+  fi
 }
 
 clear
@@ -197,17 +369,20 @@ echo " ▄██████▄    ▄▄▄▄███▄▄▄▄      ▄█
  ▀██████▀   ▀█   ███   █▀    ███    █▀     ▄████▀     ██████████   ███    ███  ▀█   ███   █▀
                                                                    ███    ███                "
 echo
-echo "Welcome to Omaterm! Let's get you set up."
-echo
 
-# Git identity
-run_setup_section "Git identity" setup_git_identity
-run_setup_section "GitHub authentication" setup_gh_authentication
-run_setup_section "Tailscale setup" setup_tailscale
-run_setup_section "SSH key setup" setup_ssh_public_key
-run_setup_section "1Password authentication" setup_1password
+if decode_setup_token; then
+  run_setup_section "Setup token" apply_setup_token
+  if [ "$SETUP_TOKEN_FROM_ENV" = "1" ] && [ -n "${OMATERM_TS_HOSTNAME:-}" ] && [ "$SETUP_SECTION_FAILED" = "0" ]; then
+    SETUP_UNATTENDED=1
+  fi
+else
+  run_setup_section "Git identity" setup_git_identity
+  run_setup_section "GitHub authentication" setup_gh_authentication
+  run_setup_section "Tailscale setup" setup_tailscale
+  run_setup_section "SSH key setup" setup_ssh_public_key
+  run_setup_section "1Password authentication" setup_1password
 
-echo
-gum spin --spinner "globe" --title "Setup done! Press any key to tmux..." -- bash -c 'read -n 1 -s </dev/tty'
+  print_setup_token
+fi
 
-touch "$MARKER"
+finish_setup
