@@ -1,0 +1,210 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+IMAGE="${OMATERM_IMAGE:-ghcr.io/omacom-io/omaterm}"
+DEFAULT_NAME="omaterm"
+LABEL="omaterm=1"
+
+usage() {
+  cat >&2 <<'EOF'
+Usage:
+  omaterm
+  omaterm new NAME [-t TOKEN] [-h HOSTNAME|--ts-hostname HOSTNAME]
+  omaterm rm [NAME]
+EOF
+}
+
+docker_env_args() {
+  local setup_token="${1:-${OMATERM_SETUP_TOKEN:-}}"
+  local tailscale_hostname="${2:-${OMATERM_TS_HOSTNAME:-}}"
+
+  if [[ -n $setup_token ]]; then
+    printf '%s\0%s\0' -e "OMATERM_SETUP_TOKEN=$setup_token"
+  fi
+
+  if [[ -n $tailscale_hostname ]]; then
+    printf '%s\0%s\0' -e "OMATERM_TS_HOSTNAME=$tailscale_hostname"
+  fi
+}
+
+validate_name() {
+  local name="$1"
+
+  if [[ ! $name =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]; then
+    echo "Invalid Omaterm name: $name" >&2
+    echo "Use letters, numbers, dots, underscores, and hyphens." >&2
+    exit 2
+  fi
+}
+
+omaterm_names() {
+  docker container ls -a --filter "label=$LABEL" --format '{{.Names}}' | sort -u
+}
+
+container_exists() {
+  docker container inspect "$1" >/dev/null 2>&1
+}
+
+container_running() {
+  [[ "$(docker inspect -f '{{.State.Running}}' "$1")" == "true" ]]
+}
+
+choose_omaterm() {
+  local action="$1"
+  shift
+
+  if (($# == 0)); then
+    return 1
+  elif (($# == 1)); then
+    printf '%s\n' "$1"
+    return
+  fi
+
+  if command -v gum >/dev/null 2>&1 && [ -t 0 ]; then
+    printf '%s\n' "$@" | gum choose --header "$action Omaterm"
+    return
+  fi
+
+  if [ -t 0 ] && [ -r /dev/tty ]; then
+    local index choice
+
+    echo "$action Omaterm:" >/dev/tty
+    index=1
+    for choice in "$@"; do
+      printf '  %d) %s\n' "$index" "$choice" >/dev/tty
+      index=$((index + 1))
+    done
+
+    while true; do
+      read -r -p "> " choice </dev/tty
+      if [[ $choice =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= $# )); then
+        printf '%s\n' "${!choice}"
+        return
+      fi
+    done
+  fi
+
+  echo "Multiple Omaterm containers found. Re-run from an interactive terminal." >&2
+  return 1
+}
+
+run_new() {
+  local name="$1" setup_token="" tailscale_hostname=""
+  local env_args=()
+  shift
+
+  while (($#)); do
+    case "$1" in
+      -t)
+        [[ -n ${2:-} ]] || {
+          usage
+          exit 2
+        }
+        setup_token="${2:-}"
+        shift 2
+        ;;
+      -h | --ts-hostname)
+        [[ -n ${2:-} ]] || {
+          usage
+          exit 2
+        }
+        tailscale_hostname="${2:-}"
+        shift 2
+        ;;
+      *)
+        usage
+        exit 2
+        ;;
+    esac
+  done
+
+  validate_name "$name"
+
+  if container_exists "$name"; then
+    echo "Omaterm already exists: $name" >&2
+    exit 1
+  fi
+
+  if [ -t 0 ] && [ -r /dev/tty ]; then
+    exec </dev/tty
+  fi
+
+  while IFS= read -r -d '' arg; do
+    env_args+=("$arg")
+  done < <(docker_env_args "$setup_token" "$tailscale_hostname")
+
+  exec docker run -it "${env_args[@]}" \
+    --name "$name" \
+    --label "$LABEL" \
+    --net host \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    "$IMAGE"
+}
+
+run_start() {
+  local names name
+
+  mapfile -t names < <(omaterm_names)
+
+  if ((${#names[@]} == 0)); then
+    run_new "$DEFAULT_NAME"
+  fi
+
+  name="$(choose_omaterm "Start" "${names[@]}")"
+
+  if container_running "$name"; then
+    exec docker attach "$name"
+  else
+    exec docker start -ai "$name"
+  fi
+}
+
+run_rm() {
+  local names name="${1:-}"
+
+  if [[ -n $name ]]; then
+    validate_name "$name"
+    container_exists "$name" || {
+      echo "No such Omaterm: $name" >&2
+      exit 1
+    }
+  else
+    mapfile -t names < <(omaterm_names)
+
+    if ((${#names[@]} == 0)); then
+      echo "No Omaterm containers found." >&2
+      exit 1
+    fi
+
+    name="$(choose_omaterm "Remove" "${names[@]}")"
+  fi
+
+  docker rm -f "$name"
+}
+
+case "${1:-}" in
+  "")
+    run_start
+    ;;
+  new)
+    (($# >= 2)) || {
+      usage
+      exit 2
+    }
+    run_new "${@:2}"
+    ;;
+  rm)
+    (($# <= 2)) || {
+      usage
+      exit 2
+    }
+    run_rm "${2:-}"
+    ;;
+  -h | --help | help)
+    usage
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac

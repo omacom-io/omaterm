@@ -33,10 +33,17 @@ At the end of first-run setup, Omaterm can copy a base64-encoded JSON setup toke
 OMATERM_SETUP_TOKEN=... omaterm
 ```
 
+Or create a second named Omaterm with:
+
+```bash
+omaterm new omaterm2 -t ...
+```
+
 To skip the Tailscale hostname prompt too, pass a unique hostname for the new machine:
 
 ```bash
 OMATERM_SETUP_TOKEN=... OMATERM_TS_HOSTNAME=my-omaterm omaterm
+omaterm new omaterm2 -t ... -h my-omaterm
 ```
 
 If no environment variable is present, setup starts the normal interactive questions. Press Ctrl+C at a setup prompt to enter a setup token. Press Ctrl+C again at the token prompt to skip the rest of setup without printing a new token.
@@ -48,10 +55,12 @@ For Docker installs, the token is applied when the container is first created; a
 docker run -it --name omaterm --net host -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/omacom-io/omaterm
 ```
 
-Then setup this alias in your shell to be able to start Omaterm easily:
+Then use the installed `omaterm` command to reconnect, create additional named Omaterms, or remove one:
 
 ```bash
-alias omaterm='docker start -ai omaterm'
+omaterm
+omaterm new omaterm2
+omaterm rm omaterm2
 ```
 
 The named container persists its filesystem across starts, including home directory state, installed packages, git config, shell history, and projects. Docker state is stored by the host daemon. Remove the Omaterm container with `docker rm omaterm` when you want to reset its shell environment. Omaterm uses the host Docker daemon through `/var/run/docker.sock`, so images, volumes, networks, and databases are shared with the host. It also uses host networking so services published to host localhost by those containers are reachable from inside Omaterm.

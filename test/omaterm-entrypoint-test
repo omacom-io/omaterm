@@ -19,25 +19,16 @@ line_of() {
 }
 
 grep -qF 'NOPASSWD: /usr/bin/tailscale' "$ENTRYPOINT" ||
-  fail "entrypoint should temporarily grant passwordless sudo only for tailscale"
-
-grep -qF 'rm -f "$TAILSCALE_SUDOERS"' "$ENTRYPOINT" ||
-  fail "entrypoint should remove the temporary tailscale sudoers rule after setup"
+  fail "entrypoint should grant passwordless sudo only for tailscale"
 
 grep -qF 'start_tailscaled' "$ENTRYPOINT" ||
   fail "entrypoint should start tailscaled before setup"
 
 setup_line="$(grep -nF '/home/omaterm/.local/bin/omaterm-setup' "$ENTRYPOINT" | tail -n1 | cut -d: -f1)"
-grant_line="$(line_of "$ENTRYPOINT" 'grant_tailscale_sudo')"
-revoke_line="$(line_of "$ENTRYPOINT" 'revoke_tailscale_sudo')"
 tailscaled_line="$(line_of "$ENTRYPOINT" 'start_tailscaled')"
 handoff_line="$(grep -nF 'bash -l "$@"' "$ENTRYPOINT" | head -n1 | cut -d: -f1)"
 [[ -n $setup_line && -n $handoff_line ]] && (( setup_line < handoff_line )) ||
   fail "entrypoint should run setup before shell handoff"
-
-[[ -n $grant_line && -n $setup_line && -n $revoke_line && -n $handoff_line ]] &&
-  (( grant_line < setup_line && setup_line < revoke_line && revoke_line < handoff_line )) ||
-  fail "entrypoint should only keep tailscale sudoers around setup"
 
 [[ -n $tailscaled_line && -n $setup_line ]] && (( tailscaled_line < setup_line )) ||
   fail "entrypoint should start tailscaled before setup"

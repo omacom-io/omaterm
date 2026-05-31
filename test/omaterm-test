@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT="$ROOT/bin/omaterm"
+
+fail() {
+  echo "not ok - $1" >&2
+  exit 1
+}
+
+pass() {
+  echo "ok - $1"
+}
+
+assert_file_contains() {
+  local file="$1" expected="$2" label="$3"
+  grep -qF -- "$expected" "$file" || {
+    echo "--- $file ---" >&2
+    cat "$file" >&2 2>/dev/null || true
+    fail "$label"
+  }
+}
+
+new_env() {
+  TEST_TMP="$(mktemp -d)"
+  TEST_BIN="$TEST_TMP/bin"
+  TEST_CONTAINERS="$TEST_TMP/containers"
+  mkdir -p "$TEST_BIN"
+  : >"$TEST_CONTAINERS"
+  export TEST_TMP TEST_CONTAINERS
+}
+
+write_docker() {
+  cat >"$TEST_BIN/docker" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+container_exists() {
+  local wanted="$1" name running label
+  while IFS=: read -r name running label; do
+    [[ $name == "$wanted" ]] && return 0
+  done <"$TEST_CONTAINERS"
+  return 1
+}
+
+container_running() {
+  local wanted="$1" name running label
+  while IFS=: read -r name running label; do
+    if [[ $name == "$wanted" ]]; then
+      [[ $running == "true" ]] && return 0 || return 1
+    fi
+  done <"$TEST_CONTAINERS"
+  return 1
+}
+
+if [[ ${1:-} == "container" && ${2:-} == "ls" ]]; then
+  while IFS=: read -r name running label; do
+    [[ -n $name && $label == "1" ]] && printf '%s\n' "$name"
+  done <"$TEST_CONTAINERS"
+  exit 0
+fi
+
+if [[ ${1:-} == "container" && ${2:-} == "inspect" ]]; then
+  container_exists "${3:-}" && exit 0 || exit 1
+fi
+
+if [[ ${1:-} == "inspect" && ${2:-} == "-f" ]]; then
+  if container_running "${4:-}"; then
+    echo true
+  else
+    echo false
+  fi
+  exit 0
+fi
+
+printf '%s\n' "$*" >>"$TEST_TMP/docker-actions"
+exit 0
+SH
+  chmod +x "$TEST_BIN/docker"
+}
+
+write_gum() {
+  cat >"$TEST_BIN/gum" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TMP/gum-calls"
+printf '%s\n' "$TEST_GUM_CHOICE"
+SH
+  chmod +x "$TEST_BIN/gum"
+}
+
+run_omaterm() {
+  PATH="$TEST_BIN:$PATH" OMATERM_IMAGE="omaterm:test" "$SCRIPT" "$@" >"$TEST_TMP/output" 2>&1
+}
+
+test_default_creates_omaterm() {
+  new_env
+  write_docker
+
+  run_omaterm
+
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name omaterm --label omaterm=1 --net host -v /var/run/docker.sock:/var/run/docker.sock omaterm:test" "default command creates omaterm"
+  pass "default creates omaterm"
+}
+
+test_new_with_setup_token() {
+  new_env
+  write_docker
+
+  run_omaterm new omaterm2 -t token123 -h host2
+
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it -e OMATERM_SETUP_TOKEN=token123 -e OMATERM_TS_HOSTNAME=host2 --name omaterm2 --label omaterm=1" "new passes setup token env"
+  pass "new with setup token"
+}
+
+test_default_starts_existing() {
+  new_env
+  write_docker
+  printf 'omaterm:false:1\n' >"$TEST_CONTAINERS"
+
+  run_omaterm
+
+  assert_file_contains "$TEST_TMP/docker-actions" "start -ai omaterm" "default starts stopped omaterm"
+  pass "default starts existing"
+}
+
+test_default_attaches_running() {
+  new_env
+  write_docker
+  printf 'omaterm:true:1\n' >"$TEST_CONTAINERS"
+
+  run_omaterm
+
+  assert_file_contains "$TEST_TMP/docker-actions" "attach omaterm" "default attaches running omaterm"
+  pass "default attaches running"
+}
+
+test_multiple_uses_gum_choice() {
+  new_env
+  write_docker
+  write_gum
+  export TEST_GUM_CHOICE=omaterm2
+  printf 'omaterm:false:1\nomaterm2:false:1\n' >"$TEST_CONTAINERS"
+
+  PATH="$TEST_BIN:$PATH" OMATERM_IMAGE="omaterm:test" script -qfec "$SCRIPT" "$TEST_TMP/typescript" >/dev/null 2>&1
+
+  assert_file_contains "$TEST_TMP/gum-calls" "choose --header Start Omaterm" "multiple omaterms use gum choose"
+  assert_file_contains "$TEST_TMP/docker-actions" "start -ai omaterm2" "default starts selected omaterm"
+  pass "multiple uses gum choice"
+}
+
+test_rm_default() {
+  new_env
+  write_docker
+  printf 'omaterm:false:1\n' >"$TEST_CONTAINERS"
+
+  run_omaterm rm
+
+  assert_file_contains "$TEST_TMP/docker-actions" "rm -f omaterm" "rm removes default omaterm"
+  pass "rm default"
+}
+
+test_rm_named() {
+  new_env
+  write_docker
+  printf 'omaterm2:false:1\n' >"$TEST_CONTAINERS"
+
+  run_omaterm rm omaterm2
+
+  assert_file_contains "$TEST_TMP/docker-actions" "rm -f omaterm2" "rm removes named omaterm"
+  pass "rm named"
+}
+
+main() {
+  test_default_creates_omaterm
+  test_new_with_setup_token
+  test_default_starts_existing
+  test_default_attaches_running
+  test_multiple_uses_gum_choice
+  test_rm_default
+  test_rm_named
+}
+
+main "$@"
