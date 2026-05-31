@@ -70,7 +70,7 @@ install_docker_alias() {
 
   alias_line="alias omaterm='docker start -ai omaterm'"
 
-  if is_debian || is_wsl; then
+  if is_debian; then
     alias_file="$HOME/.bash_aliases"
   else
     alias_file="$HOME/.bashrc"
@@ -82,7 +82,7 @@ install_docker_alias() {
     printf '\n%s\n' "$alias_line" >>"$alias_file"
   fi
 
-  if is_debian || is_wsl; then
+  if is_debian; then
     touch "$HOME/.bashrc"
 
     if ! grep -qF '. ~/.bash_aliases' "$HOME/.bashrc"; then
