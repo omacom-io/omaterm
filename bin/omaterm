@@ -9,7 +9,7 @@ usage() {
   cat >&2 <<'EOF'
 Usage:
   omaterm
-  omaterm new NAME [-t TOKEN] [-h HOSTNAME]
+  omaterm new NAME [-d] [-t TOKEN] [-h HOSTNAME]
   omaterm ls
   omaterm rm [-a|NAME]
 EOF
@@ -90,8 +90,8 @@ choose_omaterm() {
 }
 
 run_new() {
-  local name="$1" setup_token="" tailscale_hostname=""
-  local env_args=()
+  local name="$1" setup_token="" tailscale_hostname="" mount_docker=0
+  local docker_args=() env_args=()
   shift
 
   while (($#)); do
@@ -111,6 +111,10 @@ run_new() {
         }
         tailscale_hostname="${2:-}"
         shift 2
+        ;;
+      -d)
+        mount_docker=1
+        shift
         ;;
       *)
         usage
@@ -134,11 +138,15 @@ run_new() {
     env_args+=("$arg")
   done < <(docker_env_args "$setup_token" "$tailscale_hostname")
 
+  if (( mount_docker )); then
+    docker_args+=(-v /var/run/docker.sock:/var/run/docker.sock)
+  fi
+
   exec docker run -it "${env_args[@]}" \
     --name "$name" \
     --label "$LABEL" \
     --net host \
-    -v /var/run/docker.sock:/var/run/docker.sock \
+    "${docker_args[@]}" \
     "$IMAGE"
 }
 
