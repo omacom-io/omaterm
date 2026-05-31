@@ -6,7 +6,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DOCKER_CONFIG_DIR=""
 
 cleanup() {
-  if [ -n "$DOCKER_CONFIG_DIR" ]; then
+  if [[ -n $DOCKER_CONFIG_DIR ]]; then
     rm -rf "$DOCKER_CONFIG_DIR"
   fi
 }
@@ -14,15 +14,16 @@ trap cleanup EXIT
 
 usage() {
   cat >&2 <<'EOF'
-Usage: omaterm-build test|push
+Usage: omaterm-build test|run|push
 
 omaterm-build test  builds omaterm:local and runs a disposable container using host Docker and networking
+omaterm-build run   runs omaterm:local without rebuilding
 omaterm-build push  builds and pushes ghcr.io/omacom-io/omaterm:latest
 EOF
 }
 
 case "$COMMAND" in
-  test) IMAGE="${OMATERM_IMAGE:-omaterm:local}" ;;
+  test | run) IMAGE="${OMATERM_IMAGE:-omaterm:local}" ;;
   push) IMAGE="${OMATERM_IMAGE:-ghcr.io/omacom-io/omaterm:latest}" ;;
   *)
     usage
@@ -30,32 +31,36 @@ case "$COMMAND" in
     ;;
 esac
 
-echo "Using gh auth token for Docker build to avoid GitHub API rate-limit errors."
-if ! GITHUB_TOKEN="$(gh auth token)" || [ -z "$GITHUB_TOKEN" ]; then
-  echo "Could not get a GitHub token from gh. Run: gh auth login" >&2
-  exit 1
-fi
-export GITHUB_TOKEN
-export DOCKER_BUILDKIT=1
-
-if [ "$COMMAND" = "push" ]; then
-  if ! GITHUB_USER="$(gh api user --jq .login)" || [ -z "$GITHUB_USER" ]; then
-    echo "Could not determine GitHub username from gh." >&2
+# Build image for test or push
+if [[ $COMMAND != "run" ]]; then
+  echo "Using gh auth token for Docker build to avoid GitHub API rate-limit errors."
+  if ! GITHUB_TOKEN="$(gh auth token)" || [[ -z $GITHUB_TOKEN ]]; then
+    echo "Could not get a GitHub token from gh. Run: gh auth login" >&2
     exit 1
   fi
 
-  DOCKER_CONFIG_DIR="$(mktemp -d)"
-  export DOCKER_CONFIG="$DOCKER_CONFIG_DIR"
+  export GITHUB_TOKEN
+  export DOCKER_BUILDKIT=1
 
-  if ! login_output="$(printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_USER" --password-stdin 2>&1)"; then
-    echo "$login_output" >&2
-    exit 1
+  if [[ $COMMAND == "push" ]]; then
+    if ! GITHUB_USER="$(gh api user --jq .login)" || [[ -z $GITHUB_USER ]]; then
+      echo "Could not determine GitHub username from gh." >&2
+      exit 1
+    fi
+
+    DOCKER_CONFIG_DIR="$(mktemp -d)"
+    export DOCKER_CONFIG="$DOCKER_CONFIG_DIR"
+
+    if ! login_output="$(printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_USER" --password-stdin 2>&1)"; then
+      echo "$login_output" >&2
+      exit 1
+    fi
   fi
-fi
 
-docker build --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN -t "$IMAGE" "$REPO_ROOT"
+  docker build --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN -t "$IMAGE" "$REPO_ROOT"
+fi
 
 case "$COMMAND" in
   push) docker push "$IMAGE" ;;
-  test) docker run -it --rm --network host -v /var/run/docker.sock:/var/run/docker.sock "$IMAGE" ;;
+  test | run) docker run -it --rm --network host -v /var/run/docker.sock:/var/run/docker.sock "$IMAGE" ;;
 esac
