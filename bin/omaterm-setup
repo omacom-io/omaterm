@@ -120,21 +120,6 @@ gum_confirm() {
   return "$status"
 }
 
-prompt_copy_setup_token() {
-  local status
-
-  set +e
-  trap : INT
-  gum confirm "Copy setup token to clipboard?" --default=false
-  status=$?
-  trap - INT
-  set -e
-
-  if (( status == 0 )); then
-    copy_setup_token
-  fi
-}
-
 copy_setup_token() {
   local setup_json setup_token osc52_token
 
@@ -260,14 +245,14 @@ finish_setup() {
   if (( SETUP_UNATTENDED )); then
     return
   elif [ -t 0 ] && [ -r /dev/tty ]; then
-    if (( SETUP_IN_PROGRESS )); then
-      prompt_copy_setup_token
-    fi
+    (( SETUP_IN_PROGRESS )) && copy_setup_token
     gum spin --spinner "globe" --title "Setup complete. Press any key to tmux..." -- bash -c 'read -n 1 -s </dev/tty'
   else
     echo "Setup complete"
   fi
 }
+
+banner
 
 if [[ -n ${OMATERM_SETUP_TOKEN:-} ]]; then
   if decode_setup_token "$OMATERM_SETUP_TOKEN"; then
@@ -277,7 +262,6 @@ if [[ -n ${OMATERM_SETUP_TOKEN:-} ]]; then
     fi
   fi
 else
-  banner
   run_interactive_setup
 fi
 
