@@ -9,7 +9,7 @@ usage() {
   cat >&2 <<'EOF'
 Usage:
   omaterm
-  omaterm new NAME [-d] [-t TOKEN] [-h HOSTNAME]
+  omaterm new NAME [-d] [-t SETUP-TOKEN] [-h TAILSCALE-HOSTNAME]
   omaterm ls
   omaterm rm [-a|NAME]
 EOF
