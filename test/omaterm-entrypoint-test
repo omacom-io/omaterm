@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENTRYPOINT="$ROOT/bin/omaterm-entrypoint"
+DOCKERFILE="$ROOT/Dockerfile"
 
 fail() {
   echo "not ok - $1" >&2
@@ -18,8 +19,16 @@ line_of() {
   grep -nxF "$pattern" "$file" | head -n1 | cut -d: -f1
 }
 
-grep -qF 'NOPASSWD: /usr/bin/tailscale' "$ENTRYPOINT" ||
-  fail "entrypoint should grant passwordless sudo only for tailscale"
+grep -qF 'NOPASSWD: ALL' "$DOCKERFILE" ||
+  fail "Docker image should keep passwordless sudo inside Omaterm"
+
+if grep -qF 'passwd omaterm' "$ENTRYPOINT"; then
+  fail "entrypoint should not ask for a sudo password"
+fi
+
+if grep -qF 'omaterm-tailscale' "$ENTRYPOINT"; then
+  fail "entrypoint should not add a separate tailscale sudoers rule"
+fi
 
 grep -qF 'start_tailscaled' "$ENTRYPOINT" ||
   fail "entrypoint should start tailscaled before setup"

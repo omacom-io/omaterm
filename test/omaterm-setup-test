@@ -285,6 +285,33 @@ SH
   pass "interactive env token does not copy setup token"
 }
 
+test_env_token_prompted_hostname_does_not_copy_token() {
+  new_env
+  write_common_fakes
+  write_gum <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TMP/gum-calls"
+case "${1:-}" in
+  input)
+    [[ "$*" == *"Tailnet hostname"* ]] && printf 'token-host\n'
+    ;;
+  spin) exit 0 ;;
+  *) exit 99 ;;
+esac
+SH
+
+  OMATERM_SETUP_TOKEN="$(setup_token)" \
+    HOME="$TEST_HOME" \
+    PATH="$TEST_BIN:$ROOT/bin:$PATH" \
+    OMATERM_DOCKER=1 \
+    script -qfec "$SCRIPT" "$TEST_TMP/typescript" >/dev/null 2>&1
+
+  assert_file_contains "$TEST_TMP/gum-calls" "Tailnet hostname" "env token prompts for missing tailscale hostname"
+  assert_file_contains "$TEST_TMP/tailscale-calls" "up --ssh --accept-routes --hostname=token-host --auth-key=tskey-token" "env token uses prompted tailscale hostname"
+  assert_file_not_contains "$TEST_TMP/typescript" $'\033]52;c;' "env token with prompted hostname does not copy setup token"
+  pass "env token with prompted hostname does not copy setup token"
+}
+
 test_ctrl_c_skips_setup() {
   new_env
   write_common_fakes
@@ -608,6 +635,7 @@ main() {
   test_env_token_unattended
   test_env_token_missing_tailscale_applies_rest
   test_env_token_interactive_does_not_copy_token
+  test_env_token_prompted_hostname_does_not_copy_token
   test_ctrl_c_skips_setup
   test_confirm_interrupt_status_skips_setup
   test_ctrl_c_after_manual_progress_finishes_setup

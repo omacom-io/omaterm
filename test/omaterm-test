@@ -22,6 +22,11 @@ assert_file_contains() {
   }
 }
 
+assert_file_not_contains() {
+  local file="$1" unexpected="$2" label="$3"
+  [[ ! -e "$file" ]] || ! grep -qF -- "$unexpected" "$file" || fail "$label"
+}
+
 new_env() {
   TEST_TMP="$(mktemp -d)"
   TEST_BIN="$TEST_TMP/bin"
@@ -99,7 +104,8 @@ test_default_creates_omaterm() {
 
   run_omaterm
 
-  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name omaterm --label omaterm=1 --net host -v /var/run/docker.sock:/var/run/docker.sock omaterm:test" "default command creates omaterm"
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name omaterm --label omaterm=1 --net host omaterm:test" "default command creates omaterm"
+  assert_file_not_contains "$TEST_TMP/docker-actions" "/var/run/docker.sock" "default command does not mount host Docker"
   pass "default creates omaterm"
 }
 
@@ -110,7 +116,18 @@ test_new_with_setup_token() {
   run_omaterm new omaterm2 -t token123 -h host2
 
   assert_file_contains "$TEST_TMP/docker-actions" "run -it -e OMATERM_SETUP_TOKEN=token123 -e OMATERM_TS_HOSTNAME=host2 --name omaterm2 --label omaterm=1" "new passes setup token env"
+  assert_file_not_contains "$TEST_TMP/docker-actions" "/var/run/docker.sock" "new does not mount host Docker by default"
   pass "new with setup token"
+}
+
+test_new_mounts_docker_with_d() {
+  new_env
+  write_docker
+
+  run_omaterm new omaterm2 -d
+
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name omaterm2 --label omaterm=1 --net host -v /var/run/docker.sock:/var/run/docker.sock omaterm:test" "new -d mounts host Docker"
+  pass "new mounts Docker with -d"
 }
 
 test_default_starts_existing() {
@@ -200,6 +217,7 @@ test_rm_all() {
 main() {
   test_default_creates_omaterm
   test_new_with_setup_token
+  test_new_mounts_docker_with_d
   test_default_starts_existing
   test_default_attaches_running
   test_multiple_uses_gum_choice
