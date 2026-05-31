@@ -18,7 +18,6 @@ USER omaterm
 WORKDIR /home/omaterm
 ENV SHELL=/bin/bash
 ENV OMATERM_DOCKER=1
-ENV MISE_JOBS=1
 
 # Install omadots
 RUN curl -fsSL https://raw.githubusercontent.com/omacom-io/omadots/refs/heads/master/install.sh | bash
