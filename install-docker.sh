@@ -53,7 +53,7 @@ install_docker_packages() {
     sudo pacman -S --needed --noconfirm docker
   elif is_debian; then
     section "Installing Docker..."
-    sudo apt-get update
+    sudo apt-get update -y
     sudo apt-get install -y docker.io
   elif is_fedora; then
     section "Installing Docker..."
