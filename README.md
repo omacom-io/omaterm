@@ -27,7 +27,7 @@ You'll be dropped straight into the Docker setup. You can always return to your 
 
 ## Setup token
 
-At the end of first-run setup, Omaterm prints a base64-encoded JSON setup token. Reuse it on another Omaterm with:
+At the end of first-run setup, Omaterm can copy a base64-encoded JSON setup token to your clipboard. Reuse it on another Omaterm with:
 
 ```bash
 OMATERM_SETUP_TOKEN=... omaterm
@@ -39,7 +39,7 @@ To skip the Tailscale hostname prompt too, pass a unique hostname for the new ma
 OMATERM_SETUP_TOKEN=... OMATERM_TS_HOSTNAME=my-omaterm omaterm
 ```
 
-If no environment variable is present, setup asks whether you want to enter one before falling back to interactive setup.
+If no environment variable is present, setup starts the normal interactive questions. Press Ctrl+C at a setup prompt to enter a setup token. Press Ctrl+C again at the token prompt to skip the rest of setup without printing a new token.
 For Docker installs, the token is applied when the container is first created; an existing `omaterm` container keeps its original environment.
 
 ## Run manually
