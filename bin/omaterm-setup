@@ -19,6 +19,7 @@ SETUP_UNATTENDED=0
 SETUP_SECTION_FAILED=0
 SETUP_FINISHED=0
 SETUP_IN_PROGRESS=0
+SETUP_FROM_TOKEN=0
 
 if [[ -f $SETUP_DONE_MARKER ]]; then
   exit 0
@@ -245,7 +246,7 @@ finish_setup() {
   if (( SETUP_UNATTENDED )); then
     return
   elif [ -t 0 ] && [ -r /dev/tty ]; then
-    (( SETUP_IN_PROGRESS )) && copy_setup_token
+    (( SETUP_IN_PROGRESS && ! SETUP_FROM_TOKEN )) && copy_setup_token
     gum spin --spinner "globe" --title "Setup complete. Press any key to tmux..." -- bash -c 'read -n 1 -s </dev/tty'
   else
     echo "Setup complete"
@@ -255,6 +256,7 @@ finish_setup() {
 banner
 
 if [[ -n ${OMATERM_SETUP_TOKEN:-} ]]; then
+  SETUP_FROM_TOKEN=1
   if decode_setup_token "$OMATERM_SETUP_TOKEN"; then
     run_setup_section "Setup token" apply_setup_token
     if [[ -n ${OMATERM_TS_HOSTNAME:-} ]] && (( ! SETUP_SECTION_FAILED )); then
