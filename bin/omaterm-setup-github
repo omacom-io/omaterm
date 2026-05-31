@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+GITHUB_FULL_TOKEN_URL="https://github.com/settings/tokens/new?description=Omaterm&scopes=repo,read:org,gist,write:packages"
+GITHUB_PAT_TOKEN_URL="https://github.com/settings/personal-access-tokens/new"
+
+OUTPUT_FILE=""
+TOKEN=""
+SETUP_HELPER_MANUAL_PROGRESS=0
+
+usage() {
+  echo "Usage: omaterm-setup-github --output FILE [--token TOKEN]" >&2
+}
+
+while (($#)); do
+  case "$1" in
+    --output)
+      OUTPUT_FILE="${2:-}"
+      shift 2
+      ;;
+    --token)
+      TOKEN="${2:-}"
+      shift 2
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+[[ -n $OUTPUT_FILE ]] || {
+  usage
+  exit 2
+}
+
+write_output() {
+  {
+    printf 'SETUP_GH_TOKEN=%q\n' "${SETUP_GH_TOKEN:-}"
+    printf 'SETUP_HELPER_MANUAL_PROGRESS=%q\n' "$SETUP_HELPER_MANUAL_PROGRESS"
+  } >"$OUTPUT_FILE"
+}
+
+finish_from_interrupt() {
+  write_output
+  exit 130
+}
+
+gum_input_into() {
+  local -n target="$1"
+  local value status
+  shift
+
+  set +e
+  trap : INT
+  value="$(gum input "$@")"
+  status=$?
+  trap - INT
+  set -e
+
+  if (( status == 130 )); then
+    target=""
+    finish_from_interrupt
+  elif (( status != 0 )); then
+    target=""
+    return 1
+  fi
+
+  target="$value"
+  if [[ -n $value ]]; then
+    SETUP_HELPER_MANUAL_PROGRESS=1
+    write_output
+  fi
+}
+
+setup_github_authentication() {
+  local github_token="$TOKEN"
+
+  if [[ -n $github_token ]]; then
+    SETUP_GH_TOKEN="$github_token"
+  fi
+
+  if gh auth status &>/dev/null; then
+    write_output
+    return
+  fi
+
+  if [[ -z $github_token ]]; then
+    echo "Give full access using classic token with repo, read:org, gist, and write:packages scopes:"
+    echo "$GITHUB_FULL_TOKEN_URL"
+    echo
+    echo "Give limited per-repo access with a personal-access token:"
+    echo "$GITHUB_PAT_TOKEN_URL"
+    echo
+  fi
+
+  while [[ -z $github_token ]]; do
+    gum_input_into github_token --password --placeholder "ghp_Z7fSdd..." --prompt "GitHub token: " || return 1
+  done
+
+  printf '%s' "$github_token" | gh auth login --hostname github.com --with-token || return 1
+  gh auth setup-git || return 1
+
+  SETUP_GH_TOKEN="$github_token"
+  write_output
+
+  echo "✓ GitHub"
+  echo
+}
+
+setup_github_authentication

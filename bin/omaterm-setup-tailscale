@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+TAILSCALE_HOSTNAME_FILE="$HOME/.local/state/omaterm/tailscale-hostname"
+OUTPUT_FILE=""
+AUTH_KEY=""
+SETUP_HELPER_MANUAL_PROGRESS=0
+
+usage() {
+  echo "Usage: omaterm-setup-tailscale --output FILE [--auth-key AUTH_KEY]" >&2
+}
+
+while (($#)); do
+  case "$1" in
+    --output)
+      OUTPUT_FILE="${2:-}"
+      shift 2
+      ;;
+    --auth-key)
+      AUTH_KEY="${2:-}"
+      shift 2
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+[[ -n $OUTPUT_FILE ]] || {
+  usage
+  exit 2
+}
+
+write_output() {
+  {
+    printf 'SETUP_TAILSCALE_AUTH_KEY=%q\n' "${SETUP_TAILSCALE_AUTH_KEY:-}"
+    printf 'SETUP_HELPER_MANUAL_PROGRESS=%q\n' "$SETUP_HELPER_MANUAL_PROGRESS"
+  } >"$OUTPUT_FILE"
+}
+
+gum_input_into() {
+  local -n target="$1"
+  local value status
+  shift
+
+  set +e
+  trap : INT
+  value="$(gum input "$@")"
+  status=$?
+  trap - INT
+  set -e
+
+  if (( status == 130 )); then
+    target=""
+    write_output
+    exit 130
+  elif (( status != 0 )); then
+    target=""
+    return 1
+  fi
+
+  target="$value"
+  if [[ -n $value ]]; then
+    SETUP_HELPER_MANUAL_PROGRESS=1
+    write_output
+  fi
+}
+
+start_tailscaled() {
+  if [[ ${OMATERM_DOCKER:-} == 1 || -f /.dockerenv ]]; then
+    return
+  elif systemctl cat tailscaled.service &>/dev/null; then
+    sudo systemctl daemon-reload || return 1
+    sudo systemctl enable --now tailscaled.service || return 1
+  else
+    sudo sh -c 'tailscaled >/tmp/tailscaled.log 2>&1 &' || return 1
+  fi
+}
+
+tailscale_up() {
+  if [[ ${OMATERM_DOCKER:-} == 1 || -f /.dockerenv ]]; then
+    sudo -n tailscale up "$@" || return 1
+  else
+    sudo tailscale up "$@" || return 1
+  fi
+}
+
+prompt_hostname() {
+  local -n target="$1"
+  local current_name entered_hostname
+
+  if [[ -n ${OMATERM_TS_HOSTNAME:-} ]]; then
+    if [[ $OMATERM_TS_HOSTNAME =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$ ]]; then
+      mkdir -p "$(dirname "$TAILSCALE_HOSTNAME_FILE")" || return 1
+      printf "%s\n" "$OMATERM_TS_HOSTNAME" >"$TAILSCALE_HOSTNAME_FILE" || return 1
+      target="$OMATERM_TS_HOSTNAME"
+      return
+    fi
+
+    echo "Invalid OMATERM_TS_HOSTNAME. Use letters, numbers, and hyphens only, starting with a letter or number." >&2
+    return 1
+  fi
+
+  current_name="$(cat "$TAILSCALE_HOSTNAME_FILE" 2>/dev/null || true)"
+  current_name="${current_name:-$(hostname)}"
+
+  while true; do
+    echo >&2
+    gum_input_into entered_hostname --prompt "Tailnet hostname: " --value "$current_name" || return 1
+    entered_hostname="${entered_hostname:-$current_name}"
+
+    if [[ $entered_hostname =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$ ]]; then
+      mkdir -p "$(dirname "$TAILSCALE_HOSTNAME_FILE")" || return 1
+      printf "%s\n" "$entered_hostname" >"$TAILSCALE_HOSTNAME_FILE" || return 1
+      target="$entered_hostname"
+      return
+    fi
+
+    echo "Use letters, numbers, and hyphens only, starting with a letter or number." >&2
+  done
+}
+
+setup_tailscale() {
+  local tailnet_hostname="" tailscale_auth_key="$AUTH_KEY"
+
+  if tailscale status &>/dev/null; then
+    SETUP_TAILSCALE_AUTH_KEY="$tailscale_auth_key"
+    write_output
+    return 0
+  fi
+
+  echo
+  echo "Starting Tailscale..."
+  start_tailscaled || return 1
+  prompt_hostname tailnet_hostname || return 1
+  [[ -n $tailnet_hostname ]] || return 1
+
+  while [[ -z $tailscale_auth_key ]]; do
+    echo "Grab a new auth key from the 'generate install script' block on:"
+    echo "https://login.tailscale.com/admin/machines/new-linux"
+    echo
+
+    gum_input_into tailscale_auth_key --password --placeholder "tskey-auth-kMyk..." --prompt "Tailscale auth key: " || return 1
+  done
+
+  echo
+  echo "Bringing up Tailscale..."
+  tailscale_up --ssh --accept-routes --hostname="$tailnet_hostname" --auth-key="$tailscale_auth_key" || return 1
+
+  SETUP_TAILSCALE_AUTH_KEY="$tailscale_auth_key"
+  write_output
+
+  echo "✓ Tailscale"
+  echo
+}
+
+setup_tailscale

@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+OUTPUT_FILE=""
+NAME=""
+EMAIL=""
+SETUP_HELPER_MANUAL_PROGRESS=0
+
+usage() {
+  echo "Usage: omaterm-setup-git --output FILE [--name NAME --email EMAIL]" >&2
+}
+
+while (($#)); do
+  case "$1" in
+    --output)
+      OUTPUT_FILE="${2:-}"
+      shift 2
+      ;;
+    --name)
+      NAME="${2:-}"
+      shift 2
+      ;;
+    --email)
+      EMAIL="${2:-}"
+      shift 2
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+[[ -n $OUTPUT_FILE ]] || {
+  usage
+  exit 2
+}
+
+write_output() {
+  {
+    printf 'SETUP_GIT_NAME=%q\n' "${SETUP_GIT_NAME:-}"
+    printf 'SETUP_GIT_EMAIL=%q\n' "${SETUP_GIT_EMAIL:-}"
+    printf 'SETUP_HELPER_MANUAL_PROGRESS=%q\n' "$SETUP_HELPER_MANUAL_PROGRESS"
+  } >"$OUTPUT_FILE"
+}
+
+finish_from_interrupt() {
+  write_output
+  exit 130
+}
+
+gum_input_into() {
+  local -n target="$1"
+  local value status
+  shift
+
+  set +e
+  trap : INT
+  value="$(gum input "$@")"
+  status=$?
+  trap - INT
+  set -e
+
+  if (( status == 130 )); then
+    target=""
+    finish_from_interrupt
+  elif (( status != 0 )); then
+    target=""
+    return 1
+  fi
+
+  target="$value"
+  if [[ -n $value ]]; then
+    SETUP_HELPER_MANUAL_PROGRESS=1
+    write_output
+  fi
+}
+
+setup_git_identity() {
+  local git_name="$NAME" git_email="$EMAIL"
+
+  git_name="${git_name:-$(git config --global user.name 2>/dev/null || true)}"
+  git_email="${git_email:-$(git config --global user.email 2>/dev/null || true)}"
+
+  while [[ -z $git_name ]]; do
+    gum_input_into git_name --prompt "Git Name: " || return 1
+  done
+
+  while [[ -z $git_email ]]; do
+    gum_input_into git_email --prompt "Git Email: " || return 1
+  done
+
+  git config --global user.name "$git_name" || return 1
+  git config --global user.email "$git_email" || return 1
+
+  SETUP_GIT_NAME="$git_name"
+  SETUP_GIT_EMAIL="$git_email"
+  write_output
+
+  if [[ -n $NAME || -n $EMAIL ]]; then
+    echo "✓ Git"
+  else
+    echo "✓ Git"
+    echo
+  fi
+}
+
+setup_git_identity
