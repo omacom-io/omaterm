@@ -42,16 +42,16 @@ write_docker() {
 set -euo pipefail
 
 container_exists() {
-  local wanted="$1" name running label prepared
-  while IFS=: read -r name running label prepared; do
+  local wanted="$1" name running label
+  while IFS=: read -r name running label; do
     [[ $name == "$wanted" ]] && return 0
   done <"$TEST_CONTAINERS"
   return 1
 }
 
 container_running() {
-  local wanted="$1" name running label prepared
-  while IFS=: read -r name running label prepared; do
+  local wanted="$1" name running label
+  while IFS=: read -r name running label; do
     if [[ $name == "$wanted" ]]; then
       [[ $running == "true" ]] && return 0 || return 1
     fi
@@ -60,7 +60,7 @@ container_running() {
 }
 
 if [[ ${1:-} == "container" && ${2:-} == "ls" ]]; then
-  while IFS=: read -r name running label prepared; do
+  while IFS=: read -r name running label; do
     [[ -n $name && $label == "1" ]] && printf '%s\n' "$name"
   done <"$TEST_CONTAINERS"
   exit 0
@@ -71,34 +71,11 @@ if [[ ${1:-} == "container" && ${2:-} == "inspect" ]]; then
 fi
 
 if [[ ${1:-} == "inspect" && ${2:-} == "-f" ]]; then
-  case "${3:-}" in
-    "{{.State.Running}}")
-      if container_running "${4:-}"; then
-        echo true
-      else
-        echo false
-      fi
-      ;;
-    '{{ index .Config.Labels "omaterm.prepare" }}')
-      while IFS=: read -r name running label prepared; do
-        if [[ $name == "${4:-}" ]]; then
-          [[ $prepared == "1" ]] && echo 1
-          exit 0
-        fi
-      done <"$TEST_CONTAINERS"
-      ;;
-    "{{ json .Config.Cmd }}")
-      while IFS=: read -r name running label prepared; do
-        if [[ $name == "${4:-}" ]]; then
-          [[ $prepared == "1" ]] && echo '["-c","touch /home/omaterm/.local/state/omaterm/prepare-done && exec sleep infinity"]'
-          exit 0
-        fi
-      done <"$TEST_CONTAINERS"
-      ;;
-    *)
-      echo 0
-      ;;
-  esac
+  if container_running "${4:-}"; then
+    echo true
+  else
+    echo false
+  fi
   exit 0
 fi
 
@@ -272,7 +249,7 @@ test_new_prepare_waits_until_command_finishes() {
 
   run_omaterm new hand --docker-access --prepare 'setup --reset'
 
-  assert_file_contains "$TEST_TMP/docker-actions" "run -d --name hand --label omaterm=1 --label omaterm.prepare=1 --net host $LIMITS_ONE -v /var/run/docker.sock:/var/run/docker.sock omaterm:test -c setup --reset && mkdir -p /home/omaterm/.local/state/omaterm && touch /home/omaterm/.local/state/omaterm/prepare-done && exec sleep infinity" "prepare starts named omaterm detached with bootstrap"
+  assert_file_contains "$TEST_TMP/docker-actions" "run -dit --name hand --label omaterm=1 --net host $LIMITS_ONE -v /var/run/docker.sock:/var/run/docker.sock omaterm:test -c if [ ! -f /home/omaterm/.local/state/omaterm/prepare-done ]; then setup --reset && mkdir -p /home/omaterm/.local/state/omaterm && touch /home/omaterm/.local/state/omaterm/prepare-done; fi; exec bash -l" "prepare starts named omaterm detached with bootstrap"
   assert_file_contains "$TEST_TMP/docker-actions" "logs -f hand" "prepare streams logs"
   assert_file_contains "$TEST_TMP/docker-actions" "exec hand test -f /home/omaterm/.local/state/omaterm/prepare-done" "prepare waits for marker"
   pass "new prepare waits until command finishes"
@@ -284,7 +261,7 @@ test_new_prepare_short_flag_waits_until_command_finishes() {
 
   run_omaterm new hand -p 'echo ready'
 
-  assert_file_contains "$TEST_TMP/docker-actions" "run -d --name hand --label omaterm=1 --label omaterm.prepare=1 --net host $LIMITS_ONE omaterm:test -c echo ready && mkdir -p /home/omaterm/.local/state/omaterm && touch /home/omaterm/.local/state/omaterm/prepare-done && exec sleep infinity" "short prepare starts named omaterm detached with bootstrap"
+  assert_file_contains "$TEST_TMP/docker-actions" "run -dit --name hand --label omaterm=1 --net host $LIMITS_ONE omaterm:test -c if [ ! -f /home/omaterm/.local/state/omaterm/prepare-done ]; then echo ready && mkdir -p /home/omaterm/.local/state/omaterm && touch /home/omaterm/.local/state/omaterm/prepare-done; fi; exec bash -l" "short prepare starts named omaterm detached with bootstrap"
   pass "new -p waits until command finishes"
 }
 
@@ -330,30 +307,6 @@ test_connect_named_attaches_running() {
 
   assert_file_contains "$TEST_TMP/docker-actions" "attach basecamp" "connect attaches named omaterm"
   pass "connect named attaches running"
-}
-
-test_connect_prepared_running_opens_shell() {
-  new_env
-  write_docker
-  printf 'hand:true:1:1\n' >"$TEST_CONTAINERS"
-
-  run_omaterm connect hand
-
-  assert_file_contains "$TEST_TMP/docker-actions" "exec -it hand bash -l" "connect opens shell in running prepared hand"
-  assert_file_not_contains "$TEST_TMP/docker-actions" "attach hand" "connect does not attach to prepared sleep process"
-  pass "connect prepared running opens shell"
-}
-
-test_connect_prepared_stopped_opens_shell() {
-  new_env
-  write_docker
-  printf 'hand:false:1:1\n' >"$TEST_CONTAINERS"
-
-  run_omaterm connect hand
-
-  assert_file_contains "$TEST_TMP/docker-actions" "start hand" "connect starts stopped prepared hand"
-  assert_file_contains "$TEST_TMP/docker-actions" "exec -it hand bash -l" "connect opens shell in stopped prepared hand"
-  pass "connect prepared stopped opens shell"
 }
 
 test_connect_without_name_starts_existing() {
@@ -543,8 +496,6 @@ main() {
   test_default_attaches_running
   test_connect_named_starts_existing
   test_connect_named_attaches_running
-  test_connect_prepared_running_opens_shell
-  test_connect_prepared_stopped_opens_shell
   test_connect_without_name_starts_existing
   test_multiple_uses_gum_choice
   test_ls_lists_omaterms
