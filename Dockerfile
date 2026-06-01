@@ -22,8 +22,6 @@ RUN curl -fsSL https://raw.githubusercontent.com/omacom-io/omadots/refs/heads/ma
 
 # Copy configs and bins
 COPY --chown=omaterm:omaterm config/ /home/omaterm/.config/
-COPY --chown=omaterm:omaterm bin/ /home/omaterm/.local/bin/
-RUN chmod +x /home/omaterm/.local/bin/*
 
 # Auto-start tmux in .bashrc
 RUN cat >> /home/omaterm/.bashrc <<'EOF'
