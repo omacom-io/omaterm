@@ -151,7 +151,7 @@ test_help_lists_commands() {
 
   run_omaterm -h
 
-  assert_file_contains "$TEST_TMP/output" "omaterm new NAME [-d|--docker-access] [--prepare] [--exec COMMAND]" "help lists new"
+  assert_file_contains "$TEST_TMP/output" "omaterm new NAME [-d|--docker-access] [-p|--prepare COMMAND]" "help lists new"
   assert_file_contains "$TEST_TMP/output" "omaterm connect [NAME]" "help lists connect"
   assert_file_contains "$TEST_TMP/output" "omaterm exec NAME [-w|--workdir DIR] COMMAND..." "help lists exec workdir"
   pass "help lists commands"
@@ -243,35 +243,25 @@ test_new_mounts_docker_with_long_flag() {
   pass "new mounts Docker with --docker-access"
 }
 
-test_new_exec_runs_command_after_setup() {
+test_new_prepare_waits_until_command_finishes() {
   new_env
   write_docker
 
-  run_omaterm new hand --exec 'echo boot'
-
-  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name hand --label omaterm=1 --net host $LIMITS_ONE omaterm:test -c echo boot && exec bash -l" "new --exec passes command after image"
-  pass "new --exec runs command after setup"
-}
-
-test_new_prepare_waits_until_exec_finishes() {
-  new_env
-  write_docker
-
-  run_omaterm new hand --docker-access --prepare --exec 'setup --reset'
+  run_omaterm new hand --docker-access --prepare 'setup --reset'
 
   assert_file_contains "$TEST_TMP/docker-actions" "run -d --name hand --label omaterm=1 --net host $LIMITS_ONE -v /var/run/docker.sock:/var/run/docker.sock omaterm:test -c setup --reset && mkdir -p /home/omaterm/.local/state/omaterm && touch /home/omaterm/.local/state/omaterm/prepare-done && exec sleep infinity" "prepare starts named omaterm detached with bootstrap"
   assert_file_contains "$TEST_TMP/docker-actions" "exec hand test -f /home/omaterm/.local/state/omaterm/prepare-done" "prepare waits for marker"
-  pass "new prepare waits until exec finishes"
+  pass "new prepare waits until command finishes"
 }
 
-test_new_prepare_without_exec_marks_ready_after_setup() {
+test_new_prepare_short_flag_waits_until_command_finishes() {
   new_env
   write_docker
 
-  run_omaterm new hand --prepare
+  run_omaterm new hand -p 'echo ready'
 
-  assert_file_contains "$TEST_TMP/docker-actions" "run -d --name hand --label omaterm=1 --net host $LIMITS_ONE omaterm:test -c mkdir -p /home/omaterm/.local/state/omaterm && touch /home/omaterm/.local/state/omaterm/prepare-done && exec sleep infinity" "prepare without exec marks ready after setup"
-  pass "new prepare without exec marks ready after setup"
+  assert_file_contains "$TEST_TMP/docker-actions" "run -d --name hand --label omaterm=1 --net host $LIMITS_ONE omaterm:test -c echo ready && mkdir -p /home/omaterm/.local/state/omaterm && touch /home/omaterm/.local/state/omaterm/prepare-done && exec sleep infinity" "short prepare starts named omaterm detached with bootstrap"
+  pass "new -p waits until command finishes"
 }
 
 test_default_starts_existing() {
@@ -499,9 +489,8 @@ main() {
   test_new_cli_seed_args_override_op
   test_new_mounts_docker_with_d
   test_new_mounts_docker_with_long_flag
-  test_new_exec_runs_command_after_setup
-  test_new_prepare_waits_until_exec_finishes
-  test_new_prepare_without_exec_marks_ready_after_setup
+  test_new_prepare_waits_until_command_finishes
+  test_new_prepare_short_flag_waits_until_command_finishes
   test_default_starts_existing
   test_default_attaches_running
   test_connect_named_starts_existing

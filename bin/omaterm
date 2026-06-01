@@ -20,7 +20,7 @@ usage() {
   cat >&2 <<'EOF'
 Usage:
   omaterm
-  omaterm new NAME [-d|--docker-access] [--prepare] [--exec COMMAND]
+  omaterm new NAME [-d|--docker-access] [-p|--prepare COMMAND]
     [--op ITEM]
     [--git-name NAME] [--git-email EMAIL] [--gh-token TOKEN]
     [--ts-token TOKEN] [--ts-host HOSTNAME] [--op-token TOKEN]
@@ -275,8 +275,8 @@ run_new() {
   local name="" tailscale_host="" mount_docker=0 prepare=0 status
   local setup_op=""
   local git_name="" git_email="" gh_token="" ts_token="" op_token="" ssh_key=""
-  local exec_command=""
-  local docker_args=() env_args=() name_args=() command_args=() existing prepare_command
+  local prepare_command=""
+  local docker_args=() env_args=() name_args=() command_args=() existing ready_command
 
   while (($#)); do
     case "$1" in
@@ -288,12 +288,13 @@ run_new() {
         setup_op="${2:-}"
         shift 2
         ;;
-      --exec)
+      -p | --prepare)
         [[ -n ${2:-} ]] || {
           usage
           exit 2
         }
-        exec_command="${2:-}"
+        prepare=1
+        prepare_command="${2:-}"
         shift 2
         ;;
       --ts-host)
@@ -356,10 +357,6 @@ run_new() {
         mount_docker=1
         shift
         ;;
-      --prepare)
-        prepare=1
-        shift
-        ;;
       *)
         if [[ $1 == -* ]]; then
           usage
@@ -416,14 +413,8 @@ run_new() {
   fi
 
   if (( prepare )); then
-    prepare_command="mkdir -p $(dirname "$PREPARE_DONE_MARKER") && touch $PREPARE_DONE_MARKER && exec sleep infinity"
-    if [[ -n $exec_command ]]; then
-      command_args=(-c "$exec_command && $prepare_command")
-    else
-      command_args=(-c "$prepare_command")
-    fi
-  elif [[ -n $exec_command ]]; then
-    command_args=(-c "$exec_command && exec bash -l")
+    ready_command="mkdir -p $(dirname "$PREPARE_DONE_MARKER") && touch $PREPARE_DONE_MARKER && exec sleep infinity"
+    command_args=(-c "$prepare_command && $ready_command")
   fi
 
   if (( prepare )); then

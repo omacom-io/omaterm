@@ -214,6 +214,32 @@ SH
   pass "env seed skips partial tailscale data"
 }
 
+test_setup_skips_banner_without_tty() {
+  new_env
+  write_common_fakes
+  write_gum <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TMP/gum-calls"
+exit 99
+SH
+
+  cat >"$TEST_BIN/clear" <<'SH'
+#!/usr/bin/env bash
+exit 1
+SH
+  chmod +x "$TEST_BIN/clear"
+
+  OMATERM_SETUP_GIT_NAME="Seed User" \
+    OMATERM_SETUP_GIT_EMAIL="seed@example.com" \
+    HOME="$TEST_HOME" \
+    PATH="$TEST_BIN:$ROOT/bin:$PATH" \
+    "$SCRIPT" >"$TEST_TMP/output" 2>&1
+
+  assert_file_contains "$TEST_TMP/gitconfig" "name=Seed User" "setup continues when clear would fail"
+  assert_file_not_contains "$TEST_TMP/output" "Setup complete" "unattended setup still skips final wait"
+  pass "setup skips banner without tty"
+}
+
 test_env_seed_failure_does_not_fall_back_to_interactive_setup() {
   local status
 
@@ -528,6 +554,7 @@ SH
 main() {
   test_env_seed_unattended
   test_env_seed_does_not_prompt_for_missing_tailscale_hostname
+  test_setup_skips_banner_without_tty
   test_env_seed_failure_does_not_fall_back_to_interactive_setup
   test_ctrl_c_skips_setup
   test_confirm_interrupt_status_skips_setup
