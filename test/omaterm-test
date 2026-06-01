@@ -1,0 +1,383 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT="$ROOT/bin/omaterm"
+
+fail() {
+  echo "not ok - $1" >&2
+  exit 1
+}
+
+pass() {
+  echo "ok - $1"
+}
+
+assert_file_contains() {
+  local file="$1" expected="$2" label="$3"
+  grep -qF -- "$expected" "$file" || {
+    echo "--- $file ---" >&2
+    cat "$file" >&2 2>/dev/null || true
+    fail "$label"
+  }
+}
+
+assert_file_not_contains() {
+  local file="$1" unexpected="$2" label="$3"
+  [[ ! -e "$file" ]] || ! grep -qF -- "$unexpected" "$file" || fail "$label"
+}
+
+new_env() {
+  TEST_TMP="$(mktemp -d)"
+  TEST_BIN="$TEST_TMP/bin"
+  TEST_CONTAINERS="$TEST_TMP/containers"
+  mkdir -p "$TEST_BIN"
+  : >"$TEST_CONTAINERS"
+  export TEST_TMP TEST_CONTAINERS
+}
+
+write_docker() {
+  cat >"$TEST_BIN/docker" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+container_exists() {
+  local wanted="$1" name running label
+  while IFS=: read -r name running label; do
+    [[ $name == "$wanted" ]] && return 0
+  done <"$TEST_CONTAINERS"
+  return 1
+}
+
+container_running() {
+  local wanted="$1" name running label
+  while IFS=: read -r name running label; do
+    if [[ $name == "$wanted" ]]; then
+      [[ $running == "true" ]] && return 0 || return 1
+    fi
+  done <"$TEST_CONTAINERS"
+  return 1
+}
+
+if [[ ${1:-} == "container" && ${2:-} == "ls" ]]; then
+  while IFS=: read -r name running label; do
+    [[ -n $name && $label == "1" ]] && printf '%s\n' "$name"
+  done <"$TEST_CONTAINERS"
+  exit 0
+fi
+
+if [[ ${1:-} == "container" && ${2:-} == "inspect" ]]; then
+  container_exists "${3:-}" && exit 0 || exit 1
+fi
+
+if [[ ${1:-} == "inspect" && ${2:-} == "-f" ]]; then
+  if container_running "${4:-}"; then
+    echo true
+  else
+    echo false
+  fi
+  exit 0
+fi
+
+# Record the action, then drop removed containers so omaterm_names reflects it.
+printf '%s\n' "$*" >>"$TEST_TMP/docker-actions"
+
+if [[ ${1:-} == "rm" ]]; then
+  shift
+  [[ ${1:-} == "-f" ]] && shift
+  for target in "$@"; do
+    grep -v "^$target:" "$TEST_CONTAINERS" >"$TEST_CONTAINERS.tmp" 2>/dev/null || true
+    mv "$TEST_CONTAINERS.tmp" "$TEST_CONTAINERS"
+  done
+fi
+
+exit 0
+SH
+  chmod +x "$TEST_BIN/docker"
+}
+
+write_gum() {
+  cat >"$TEST_BIN/gum" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TMP/gum-calls"
+printf '%s\n' "$TEST_GUM_CHOICE"
+SH
+  chmod +x "$TEST_BIN/gum"
+}
+
+write_op() {
+  cat >"$TEST_BIN/op" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf '%s\n' "$*" >>"$TEST_TMP/op-calls"
+
+if [[ "$*" == "item get Omaterm Setup --format json" || "$*" == "item get Omaterm Setup --vault Personal --format json" ]]; then
+  cat <<'JSON'
+{
+  "fields": [
+    { "label": "git-name", "value": "Op User" },
+    { "section": { "label": "add more" }, "label": "git-email", "value": "op@example.com" },
+    { "section": { "label": "add more" }, "label": "gh-token", "value": "ghp_op" },
+    { "section": { "label": "add more" }, "label": "ts-token", "value": "tskey-op" },
+    { "section": { "label": "add more" }, "label": "ts-host", "value": "op-host" },
+    { "section": { "label": "add more" }, "label": "op-token", "value": "ops_op" },
+    { "section": { "label": "add more" }, "label": "ssh-key", "value": "ssh-ed25519 OPKEY op" }
+  ]
+}
+JSON
+  exit 0
+fi
+
+exit 1
+SH
+  chmod +x "$TEST_BIN/op"
+}
+
+run_omaterm() {
+  PATH="$TEST_BIN:$PATH" OMATERM_IMAGE="omaterm:test" \
+    OMATERM_TOTAL_CORES="${OMATERM_TOTAL_CORES:-20}" \
+    OMATERM_TOTAL_RAM_MB="${OMATERM_TOTAL_RAM_MB:-65536}" \
+    "$SCRIPT" "$@" >"$TEST_TMP/output" 2>&1
+}
+
+# With 20 cores / 65536 MB and the 1-core / 2048 MB host reserve, a lone
+# Omaterm is pinned to cores 1-19 and capped at (65536 - 2048) MB.
+LIMITS_ONE="--cpuset-cpus 1-19 --cpu-shares 1024 --memory 63488m --memory-swap 63488m"
+
+test_default_creates_omaterm() {
+  new_env
+  write_docker
+
+  run_omaterm
+
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name omaterm --label omaterm=1 --net host $LIMITS_ONE omaterm:test" "default command creates omaterm"
+  assert_file_not_contains "$TEST_TMP/docker-actions" "/var/run/docker.sock" "default command does not mount host Docker"
+  pass "default creates omaterm"
+}
+
+test_new_with_setup_seed_args() {
+  new_env
+  write_docker
+
+  run_omaterm new omaterm2 \
+    --git-name "Seed User" \
+    --git-email seed@example.com \
+    --gh-token ghp_seed \
+    --ts-token tskey-seed \
+    --ts-host seed-host \
+    --op-token ops_seed \
+    --ssh-key "ssh-ed25519 SEEDKEY seed"
+
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it -e OMATERM_SETUP_TS_HOST=seed-host -e OMATERM_SETUP_GIT_NAME=Seed User -e OMATERM_SETUP_GIT_EMAIL=seed@example.com -e OMATERM_SETUP_GH_TOKEN=ghp_seed -e OMATERM_SETUP_TS_AUTH_KEY=tskey-seed -e OMATERM_SETUP_OP_TOKEN=ops_seed -e OMATERM_SETUP_SSH_KEY=ssh-ed25519 SEEDKEY seed --name omaterm2 --label omaterm=1" "new passes setup seed env"
+  pass "new with setup seed args"
+}
+
+test_new_with_op_setup_seed() {
+  new_env
+  write_docker
+  write_op
+
+  run_omaterm new omaterm2 --op "Omaterm Setup"
+
+  assert_file_contains "$TEST_TMP/op-calls" "item get Omaterm Setup --format json" "new reads setup fields from op item"
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it -e OMATERM_SETUP_TS_HOST=op-host -e OMATERM_SETUP_GIT_NAME=Op User -e OMATERM_SETUP_GIT_EMAIL=op@example.com -e OMATERM_SETUP_GH_TOKEN=ghp_op -e OMATERM_SETUP_TS_AUTH_KEY=tskey-op -e OMATERM_SETUP_OP_TOKEN=ops_op -e OMATERM_SETUP_SSH_KEY=ssh-ed25519 OPKEY op --name omaterm2 --label omaterm=1" "new passes op setup fields as seed env"
+  pass "new with op setup seed"
+}
+
+test_new_with_op_url_setup_seed() {
+  new_env
+  write_docker
+  write_op
+
+  run_omaterm new omaterm2 --op "op://Personal/Omaterm Setup"
+
+  assert_file_contains "$TEST_TMP/op-calls" "item get Omaterm Setup --vault Personal --format json" "new resolves op url with one item get"
+  assert_file_not_contains "$TEST_TMP/op-calls" "read" "new does not read op fields one by one"
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it -e OMATERM_SETUP_TS_HOST=op-host -e OMATERM_SETUP_GIT_NAME=Op User" "new passes op url setup fields as seed env"
+  pass "new with op url setup seed"
+}
+
+test_new_cli_seed_args_override_op() {
+  new_env
+  write_docker
+  write_op
+
+  run_omaterm new omaterm2 \
+    --op "Omaterm Setup" \
+    --gh-token ghp_cli \
+    --ts-host cli-host
+
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it -e OMATERM_SETUP_TS_HOST=cli-host -e OMATERM_SETUP_GIT_NAME=Op User -e OMATERM_SETUP_GIT_EMAIL=op@example.com -e OMATERM_SETUP_GH_TOKEN=ghp_cli -e OMATERM_SETUP_TS_AUTH_KEY=tskey-op -e OMATERM_SETUP_OP_TOKEN=ops_op -e OMATERM_SETUP_SSH_KEY=ssh-ed25519 OPKEY op --name omaterm2 --label omaterm=1" "direct seed args override op setup fields"
+  pass "new cli seed args override op"
+}
+
+test_new_mounts_docker_with_d() {
+  new_env
+  write_docker
+
+  run_omaterm new omaterm2 -d
+
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name omaterm2 --label omaterm=1 --net host $LIMITS_ONE -v /var/run/docker.sock:/var/run/docker.sock omaterm:test" "new -d mounts host Docker"
+  pass "new mounts Docker with -d"
+}
+
+test_default_starts_existing() {
+  new_env
+  write_docker
+  printf 'omaterm:false:1\n' >"$TEST_CONTAINERS"
+
+  run_omaterm
+
+  assert_file_contains "$TEST_TMP/docker-actions" "start -ai omaterm" "default starts stopped omaterm"
+  pass "default starts existing"
+}
+
+test_default_attaches_running() {
+  new_env
+  write_docker
+  printf 'omaterm:true:1\n' >"$TEST_CONTAINERS"
+
+  run_omaterm
+
+  assert_file_contains "$TEST_TMP/docker-actions" "attach omaterm" "default attaches running omaterm"
+  pass "default attaches running"
+}
+
+test_multiple_uses_gum_choice() {
+  new_env
+  write_docker
+  write_gum
+  export TEST_GUM_CHOICE=omaterm2
+  printf 'omaterm:false:1\nomaterm2:false:1\n' >"$TEST_CONTAINERS"
+
+  PATH="$TEST_BIN:$PATH" OMATERM_IMAGE="omaterm:test" script -qfec "$SCRIPT" "$TEST_TMP/typescript" >/dev/null 2>&1
+
+  assert_file_contains "$TEST_TMP/gum-calls" "choose --header Start Omaterm" "multiple omaterms use gum choose"
+  assert_file_contains "$TEST_TMP/docker-actions" "start -ai omaterm2" "default starts selected omaterm"
+  pass "multiple uses gum choice"
+}
+
+test_ls_lists_omaterms() {
+  new_env
+  write_docker
+  printf 'omaterm:false:1\nomaterm2:false:1\nplain:false:0\n' >"$TEST_CONTAINERS"
+
+  run_omaterm ls
+
+  assert_file_contains "$TEST_TMP/output" "omaterm" "ls includes default omaterm"
+  assert_file_contains "$TEST_TMP/output" "omaterm2" "ls includes second omaterm"
+  if grep -qF plain "$TEST_TMP/output"; then
+    fail "ls should only include labeled omaterms"
+  fi
+  pass "ls lists omaterms"
+}
+
+test_rm_default() {
+  new_env
+  write_docker
+  printf 'omaterm:false:1\n' >"$TEST_CONTAINERS"
+
+  run_omaterm rm
+
+  assert_file_contains "$TEST_TMP/docker-actions" "rm -f omaterm" "rm removes default omaterm"
+  pass "rm default"
+}
+
+test_rm_named() {
+  new_env
+  write_docker
+  printf 'omaterm2:false:1\n' >"$TEST_CONTAINERS"
+
+  run_omaterm rm omaterm2
+
+  assert_file_contains "$TEST_TMP/docker-actions" "rm -f omaterm2" "rm removes named omaterm"
+  pass "rm named"
+}
+
+test_rm_all() {
+  new_env
+  write_docker
+  printf 'omaterm:false:1\nomaterm2:false:1\nplain:false:0\n' >"$TEST_CONTAINERS"
+
+  run_omaterm rm -a
+
+  assert_file_contains "$TEST_TMP/docker-actions" "rm -f omaterm omaterm2" "rm -a removes all labeled omaterms"
+  pass "rm all"
+}
+
+test_new_rebalances_existing() {
+  new_env
+  write_docker
+  printf 'omaterm:false:1\nomaterm2:false:1\n' >"$TEST_CONTAINERS"
+
+  run_omaterm new omaterm3
+
+  # (65536 - 2048) / 3 Omaterms = 21162 MB each.
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name omaterm3 --label omaterm=1 --net host --cpuset-cpus 1-19 --cpu-shares 1024 --memory 21162m --memory-swap 21162m omaterm:test" "new claims its divided share"
+  assert_file_contains "$TEST_TMP/docker-actions" "update --cpuset-cpus 1-19 --cpu-shares 1024 --memory 21162m --memory-swap 21162m omaterm2" "new re-divides existing Omaterm memory"
+  pass "new rebalances existing"
+}
+
+test_rm_rebalances_remaining() {
+  new_env
+  write_docker
+  printf 'omaterm:false:1\nomaterm2:false:1\nomaterm3:false:1\n' >"$TEST_CONTAINERS"
+
+  run_omaterm rm omaterm3
+
+  # Survivors split (65536 - 2048) / 2 = 31744 MB each.
+  assert_file_contains "$TEST_TMP/docker-actions" "update --cpuset-cpus 1-19 --cpu-shares 1024 --memory 31744m --memory-swap 31744m omaterm2" "rm grows survivors' memory share"
+  pass "rm rebalances remaining"
+}
+
+test_no_limits_opts_out() {
+  new_env
+  write_docker
+
+  (
+    export OMATERM_NO_LIMITS=1
+    run_omaterm
+  )
+
+  assert_file_not_contains "$TEST_TMP/docker-actions" "--cpuset-cpus" "no-limits omits cpuset"
+  assert_file_not_contains "$TEST_TMP/docker-actions" "--memory" "no-limits omits memory cap"
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name omaterm --label omaterm=1 --net host omaterm:test" "no-limits runs without resource flags"
+  pass "no-limits opts out"
+}
+
+test_reserve_overrides() {
+  new_env
+  write_docker
+
+  (
+    export OMATERM_HOST_RESERVE_CORES=2 OMATERM_HOST_RESERVE_RAM_MB=4096
+    run_omaterm
+  )
+
+  # Reserve 2 cores (cpuset 2-19) and 4096 MB ((65536 - 4096) = 61440 MB).
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name omaterm --label omaterm=1 --net host --cpuset-cpus 2-19 --cpu-shares 1024 --memory 61440m --memory-swap 61440m omaterm:test" "host reserve is configurable"
+  pass "reserve overrides"
+}
+
+main() {
+  test_default_creates_omaterm
+  test_new_with_setup_seed_args
+  test_new_with_op_setup_seed
+  test_new_with_op_url_setup_seed
+  test_new_cli_seed_args_override_op
+  test_new_mounts_docker_with_d
+  test_default_starts_existing
+  test_default_attaches_running
+  test_multiple_uses_gum_choice
+  test_ls_lists_omaterms
+  test_rm_default
+  test_rm_named
+  test_rm_all
+  test_new_rebalances_existing
+  test_rm_rebalances_remaining
+  test_no_limits_opts_out
+  test_reserve_overrides
+}
+
+main "$@"

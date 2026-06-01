@@ -15,10 +15,7 @@ tailscaled_running() {
   return 1
 }
 
-start_tailscaled_if_configured() {
-  command -v tailscaled &>/dev/null || return 0
-  [ -e "$TAILSCALE_STATE" ] || return 0
-
+start_tailscaled() {
   mkdir -p "$(dirname "$TAILSCALE_SOCKET")" "$(dirname "$TAILSCALE_STATE")"
 
   local tun_args=(--tun=userspace-networking)
@@ -61,9 +58,8 @@ ensure_host_docker_access() {
   usermod -aG "$group_name" omaterm
 }
 
-/home/omaterm/.local/bin/omaterm-setup-sudopw
 ensure_host_docker_access
-start_tailscaled_if_configured
+start_tailscaled
 
 OMATERM_ENV=(
   HOME=/home/omaterm
@@ -71,14 +67,23 @@ OMATERM_ENV=(
   LOGNAME=omaterm
   SHELL=/bin/bash
   TERM="${TERM:-xterm-256color}"
-  OMATERM_DOCKER=1
   PATH="/home/omaterm/.local/share/mise/shims:/home/omaterm/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin"
 )
 
-run_as_omaterm() {
-  runuser -u omaterm -- env "${OMATERM_ENV[@]}" "$@"
-}
+SETUP_ENV=("${OMATERM_ENV[@]}")
+for env_name in \
+  OMATERM_SETUP_TS_HOST \
+  OMATERM_SETUP_GIT_NAME \
+  OMATERM_SETUP_GIT_EMAIL \
+  OMATERM_SETUP_GH_TOKEN \
+  OMATERM_SETUP_TS_AUTH_KEY \
+  OMATERM_SETUP_OP_TOKEN \
+  OMATERM_SETUP_SSH_KEY; do
+  if [ -n "${!env_name:-}" ]; then
+    SETUP_ENV+=("$env_name=${!env_name}")
+  fi
+done
 
-run_as_omaterm /home/omaterm/.local/bin/omaterm-setup
+runuser -u omaterm -- env "${SETUP_ENV[@]}" /home/omaterm/.local/bin/omaterm-setup
 
 exec runuser -u omaterm -- env "${OMATERM_ENV[@]}" bash -l "$@"

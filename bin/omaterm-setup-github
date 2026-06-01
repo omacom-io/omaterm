@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SETUP_HELPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bin/omaterm-setup-helper
+source "$SETUP_HELPER_DIR/omaterm-setup-helper"
+
+GITHUB_FULL_TOKEN_URL="https://github.com/settings/tokens/new?description=Omaterm&scopes=repo,read:org,gist,write:packages"
+GITHUB_PAT_TOKEN_URL="https://github.com/settings/personal-access-tokens/new"
+
+TOKEN=""
+
+usage() {
+  echo "Usage: omaterm-setup-github [--token TOKEN]" >&2
+}
+
+while (($#)); do
+  case "$1" in
+    --token)
+      TOKEN="${2:-}"
+      shift 2
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+setup_github_authentication() {
+  local github_token="$TOKEN"
+
+  if gh auth status &>/dev/null; then
+    return
+  fi
+
+  if [[ -z $github_token ]]; then
+    echo "Give full access using classic token with repo, read:org, gist, and write:packages scopes:"
+    echo "$GITHUB_FULL_TOKEN_URL"
+    echo
+    echo "Give limited per-repo access with a personal-access token:"
+    echo "$GITHUB_PAT_TOKEN_URL"
+    echo
+  fi
+
+  while [[ -z $github_token ]]; do
+    gum_input_into github_token --password --placeholder "ghp_Z7fSdd..." --prompt "GitHub token: " || return 1
+  done
+
+  printf '%s' "$github_token" | gh auth login --hostname github.com --with-token || return 1
+  gh auth setup-git || return 1
+
+  echo "✓ GitHub"
+  echo
+}
+
+setup_github_authentication

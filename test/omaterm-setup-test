@@ -1,0 +1,544 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT="$ROOT/bin/omaterm-setup"
+
+fail() {
+  echo "not ok - $1" >&2
+  exit 1
+}
+
+pass() {
+  echo "ok - $1"
+}
+
+assert_file_contains() {
+  local file="$1" expected="$2" label="$3"
+  if ! grep -qF -- "$expected" "$file"; then
+    echo "--- $file ---" >&2
+    cat "$file" >&2 2>/dev/null || true
+    fail "$label"
+  fi
+}
+
+assert_file_not_contains() {
+  local file="$1" unexpected="$2" label="$3"
+  [[ ! -e "$file" ]] || ! grep -qF -- "$unexpected" "$file" || fail "$label"
+}
+
+assert_equals() {
+  local expected="$1" actual="$2" label="$3"
+  [[ "$actual" == "$expected" ]] || fail "$label: expected '$expected', got '$actual'"
+}
+
+new_env() {
+  TEST_TMP="$(mktemp -d)"
+  TEST_HOME="$TEST_TMP/home"
+  TEST_BIN="$TEST_TMP/bin"
+  mkdir -p "$TEST_HOME" "$TEST_BIN"
+  export TEST_TMP TEST_HOME
+}
+
+write_common_fakes() {
+  cat >"$TEST_BIN/git" <<'SH'
+#!/usr/bin/env bash
+config="$TEST_TMP/gitconfig"
+if [[ "$1 $2" == "config --global" ]]; then
+  case "${3:-}" in
+    user.name)
+      if [[ $# -eq 3 ]]; then
+        value="$(sed -n 's/^name=//p' "$config" 2>/dev/null | tail -n1)"
+        [[ -n "$value" ]] || exit 1
+        printf '%s\n' "$value"
+      else
+        mkdir -p "$(dirname "$config")"
+        sed -i '/^name=/d' "$config" 2>/dev/null || true
+        printf 'name=%s\n' "$4" >>"$config"
+      fi
+      ;;
+    user.email)
+      if [[ $# -eq 3 ]]; then
+        value="$(sed -n 's/^email=//p' "$config" 2>/dev/null | tail -n1)"
+        [[ -n "$value" ]] || exit 1
+        printf '%s\n' "$value"
+      else
+        mkdir -p "$(dirname "$config")"
+        sed -i '/^email=/d' "$config" 2>/dev/null || true
+        printf 'email=%s\n' "$4" >>"$config"
+      fi
+      ;;
+  esac
+  exit 0
+fi
+exit 0
+SH
+
+  cat >"$TEST_BIN/gh" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TMP/gh-calls"
+case "$1 $2" in
+  "auth status") exit 1 ;;
+  "auth login") cat >"$TEST_TMP/gh-token" ;;
+  *) exit 0 ;;
+esac
+SH
+
+  cat >"$TEST_BIN/tailscale" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TMP/tailscale-calls"
+if [[ "${1:-}" == "status" ]]; then
+  exit 1
+fi
+exit 0
+SH
+
+  cat >"$TEST_BIN/tailscaled" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TMP/tailscaled-calls"
+exit 0
+SH
+
+  cat >"$TEST_BIN/sudo" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TMP/sudo-calls"
+case "${1:-}" in
+  -n)
+    shift
+    if [[ "${1:-}" == "tailscale" ]]; then
+      shift
+      exec tailscale "$@"
+    fi
+    exit 0
+    ;;
+  tailscale) shift; exec tailscale "$@" ;;
+  sh|mkdir|rm) exit 0 ;;
+  *) exit 0 ;;
+esac
+SH
+
+  cat >"$TEST_BIN/op" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TMP/op-calls"
+case "$1 ${2:-}" in
+  "whoami ")
+    [[ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]] && exit 0
+    exit 1
+    ;;
+  "account list")
+    printf '[]\n'
+    ;;
+  "account add")
+    cat >"$TEST_TMP/op-password"
+    printf 'export OP_SESSION_test=session\n'
+    ;;
+  "signin ")
+    cat >"$TEST_TMP/op-password"
+    printf 'export OP_SESSION_test=session\n'
+    ;;
+  *) exit 0 ;;
+esac
+SH
+
+  chmod +x "$TEST_BIN"/*
+}
+
+write_gum() {
+  cat >"$TEST_BIN/gum"
+  chmod +x "$TEST_BIN/gum"
+}
+
+run_setup() {
+  local status
+
+  set +e
+  HOME="$TEST_HOME" \
+    PATH="$TEST_BIN:$ROOT/bin:$PATH" \
+    "$SCRIPT" >"$TEST_TMP/output" 2>&1
+  status=$?
+  set -e
+
+  if [[ "$status" -ne 0 ]]; then
+    cat "$TEST_TMP/output" >&2
+    fail "omaterm-setup exited with status $status"
+  fi
+}
+
+test_env_seed_unattended() {
+  new_env
+  write_common_fakes
+  write_gum <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TMP/gum-calls"
+exit 99
+SH
+
+  OMATERM_SETUP_GIT_NAME="Seed User" \
+    OMATERM_SETUP_GIT_EMAIL="seed@example.com" \
+    OMATERM_SETUP_GH_TOKEN="ghp_seed" \
+    OMATERM_SETUP_TS_AUTH_KEY="tskey-seed" \
+    OMATERM_SETUP_TS_HOST="seed-host" \
+    OMATERM_SETUP_OP_TOKEN="ops_seed" \
+    OMATERM_SETUP_SSH_KEY="ssh-ed25519 SEEDKEY seed" \
+    HOME="$TEST_HOME" \
+    PATH="$TEST_BIN:$ROOT/bin:$PATH" \
+    "$SCRIPT" >"$TEST_TMP/output" 2>&1
+
+  [[ ! -s "$TEST_TMP/gum-calls" ]] || fail "env seed should not prompt"
+  assert_file_contains "$TEST_TMP/gitconfig" "name=Seed User" "env seed configures git name"
+  assert_file_contains "$TEST_TMP/gitconfig" "email=seed@example.com" "env seed configures git email"
+  assert_equals "ghp_seed" "$(cat "$TEST_TMP/gh-token")" "env seed logs into gh"
+  assert_file_contains "$TEST_TMP/tailscale-calls" "up --ssh --accept-routes --hostname=seed-host --auth-key=tskey-seed" "env seed brings up tailscale"
+  assert_equals "ssh-ed25519 SEEDKEY seed" "$(cat "$TEST_HOME/.ssh/authorized_keys")" "env seed installs ssh key"
+  assert_file_contains "$TEST_TMP/output" "✓ 1Password" "env seed applies 1password token"
+  assert_file_not_contains "$TEST_TMP/output" "Setup complete" "unattended env seed skips final wait"
+  pass "env seed is unattended"
+}
+
+test_env_seed_does_not_prompt_for_missing_tailscale_hostname() {
+  new_env
+  write_common_fakes
+  write_gum <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TMP/gum-calls"
+exit 99
+SH
+
+  OMATERM_SETUP_TS_AUTH_KEY="tskey-seed" \
+    HOME="$TEST_HOME" \
+    PATH="$TEST_BIN:$ROOT/bin:$PATH" \
+    "$SCRIPT" >"$TEST_TMP/output" 2>&1
+
+  [[ ! -s "$TEST_TMP/gum-calls" ]] || fail "env seed without hostname should not prompt"
+  [[ ! -e "$TEST_TMP/tailscale-calls" ]] || ! grep -qF "up --ssh" "$TEST_TMP/tailscale-calls" || fail "env seed without hostname should not run tailscale up"
+  pass "env seed skips partial tailscale data"
+}
+
+test_env_seed_failure_does_not_fall_back_to_interactive_setup() {
+  local status
+
+  new_env
+  write_common_fakes
+  write_gum <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TMP/gum-calls"
+exit 0
+SH
+
+  cat >"$TEST_BIN/omaterm-setup-github" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TMP/setup-github-calls"
+exit 2
+SH
+  chmod +x "$TEST_BIN/omaterm-setup-github"
+
+  set +e
+  OMATERM_SETUP_GH_TOKEN="ghp_seed" \
+    HOME="$TEST_HOME" \
+    PATH="$TEST_BIN:$ROOT/bin:$PATH" \
+    "$SCRIPT" >"$TEST_TMP/output" 2>&1
+  status=$?
+  set -e
+
+  [[ "$status" -ne 0 ]] || fail "failing env seed should fail setup"
+  assert_file_contains "$TEST_TMP/setup-github-calls" "--token ghp_seed" "env seed calls seeded helper"
+  [[ ! -s "$TEST_TMP/gum-calls" ]] || fail "failing env seed should not prompt"
+  [[ ! -f "$TEST_HOME/.local/state/omaterm/setup-done" ]] || fail "failing env seed should not write setup marker"
+  pass "env seed failure does not fall back to interactive setup"
+}
+
+test_ctrl_c_skips_setup() {
+  new_env
+  write_common_fakes
+  write_gum <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TMP/gum-calls"
+case "${1:-}" in
+  confirm) exit 130 ;;
+  input) exit 130 ;;
+  spin) echo "spin" >>"$TEST_TMP/spin-calls"; exit 0 ;;
+  *) exit 0 ;;
+esac
+SH
+
+  run_setup
+
+  [[ -f "$TEST_HOME/.local/state/omaterm/setup-done" ]] || fail "ctrl-c writes setup marker"
+  assert_file_not_contains "$TEST_TMP/gum-calls" "Authenticate with GitHub?" "ctrl-c skips later questions"
+  assert_file_contains "$TEST_TMP/output" "Setup complete" "ctrl-c finishes setup"
+  pass "ctrl-c skips setup"
+}
+
+test_confirm_interrupt_status_skips_setup() {
+  new_env
+  write_common_fakes
+  write_gum <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TMP/gum-calls"
+case "${1:-}" in
+  confirm) exit 2 ;;
+  spin) echo "spin" >>"$TEST_TMP/spin-calls"; exit 0 ;;
+  *) exit 0 ;;
+esac
+SH
+
+  run_setup
+
+  [[ -f "$TEST_HOME/.local/state/omaterm/setup-done" ]] || fail "non-130 confirm interrupt writes setup marker"
+  assert_file_not_contains "$TEST_TMP/gum-calls" "Authenticate with GitHub?" "non-130 confirm interrupt skips later questions"
+  assert_file_contains "$TEST_TMP/output" "Setup complete" "non-130 confirm interrupt finishes setup"
+  pass "non-130 confirm interrupt skips setup"
+}
+
+test_ctrl_c_after_manual_progress_finishes_setup() {
+  new_env
+  write_common_fakes
+  write_gum <<'SH'
+#!/usr/bin/env bash
+count_file="$TEST_TMP/gum-count"
+count="$(cat "$count_file" 2>/dev/null || echo 0)"
+count=$((count + 1))
+echo "$count" >"$count_file"
+printf '%s\n' "$*" >>"$TEST_TMP/gum-calls"
+case "$1:$count" in
+  confirm:1) exit 0 ;;
+  input:2) printf 'Manual User\n' ;;
+  input:3) exit 1 ;;
+  spin:*) echo "spin" >>"$TEST_TMP/spin-calls"; exit 0 ;;
+  *) exit 1 ;;
+esac
+SH
+
+  run_setup
+
+  [[ -f "$TEST_HOME/.local/state/omaterm/setup-done" ]] || fail "ctrl-c after manual progress writes setup marker"
+  assert_file_not_contains "$TEST_TMP/gum-calls" "Authenticate with GitHub?" "ctrl-c after manual progress skips later questions"
+  pass "ctrl-c after manual progress finishes setup"
+}
+
+test_ctrl_c_after_tailscale_hostname_finishes_setup() {
+  new_env
+  write_common_fakes
+  write_gum <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TMP/gum-calls"
+case "$1" in
+  confirm)
+    [[ "$*" == "confirm Connect to Tailscale?" ]] && exit 0
+    exit 1
+    ;;
+  input)
+    case "$*" in
+      *"Tailnet hostname"*) printf 'partial-host\n' ;;
+      *"Tailscale auth key"*) exit 1 ;;
+      *) printf '\n' ;;
+    esac
+    ;;
+  spin) exit 0 ;;
+  *) exit 0 ;;
+esac
+SH
+
+  run_setup
+
+  [[ -f "$TEST_HOME/.local/state/omaterm/setup-done" ]] || fail "ctrl-c after tailscale hostname writes setup marker"
+  assert_file_contains "$TEST_TMP/output" "Setup complete" "ctrl-c after tailscale hostname finishes setup"
+  pass "ctrl-c after tailscale hostname finishes setup"
+}
+
+test_git_manual_uses_helper() {
+  new_env
+  write_common_fakes
+  write_gum <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TMP/gum-calls"
+case "$1" in
+  confirm)
+    [[ "$*" == "confirm Identify for Git?" ]] && exit 0
+    exit 1
+    ;;
+  input)
+    case "$*" in
+      *"Git Name"*) printf 'Manual Git\n' ;;
+      *"Git Email"*) printf 'manual@example.com\n' ;;
+      *) printf '\n' ;;
+    esac
+    ;;
+  spin) exit 0 ;;
+  *) exit 0 ;;
+esac
+SH
+
+  run_setup
+
+  assert_file_contains "$TEST_TMP/gitconfig" "name=Manual Git" "manual git helper configures name"
+  assert_file_contains "$TEST_TMP/gitconfig" "email=manual@example.com" "manual git helper configures email"
+  assert_file_contains "$TEST_TMP/output" "✓ Git" "manual git setup delegates to helper"
+  pass "Git manual helper"
+}
+
+test_tailscale_manual_requires_auth_key_and_no_sudo_for_hostname() {
+  new_env
+  write_common_fakes
+  write_gum <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TMP/gum-calls"
+case "$1" in
+  confirm)
+    [[ "$*" == "confirm Connect to Tailscale?" ]] && exit 0
+    exit 1
+    ;;
+  input)
+    case "$*" in
+      *"Tailnet hostname"*) printf 'manual-host\n' ;;
+      *"Tailscale auth key"*) printf 'tskey-manual\n' ;;
+      *) printf '\n' ;;
+    esac
+    ;;
+  spin) exit 0 ;;
+  *) exit 0 ;;
+esac
+SH
+
+  run_setup
+
+  assert_file_contains "$TEST_TMP/gum-calls" "Tailscale auth key" "tailscale auth key is required"
+  assert_file_contains "$TEST_TMP/sudo-calls" "-n tailscale up --ssh --accept-routes --hostname=manual-host --auth-key=tskey-manual" "manual tailscale uses non-interactive sudo"
+  assert_file_contains "$TEST_TMP/tailscale-calls" "up --ssh --accept-routes --hostname=manual-host --auth-key=tskey-manual" "manual tailscale uses auth key"
+  assert_equals "manual-host" "$(cat "$TEST_HOME/.local/state/omaterm/tailscale-hostname")" "manual tailscale hostname stored in user state"
+  assert_file_not_contains "$TEST_TMP/sudo-calls" "tee" "tailscale hostname storage does not use sudo"
+  pass "manual tailscale requires auth key and stores hostname without sudo"
+}
+
+test_github_manual_uses_helper() {
+  new_env
+  write_common_fakes
+  write_gum <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TMP/gum-calls"
+case "$1" in
+  confirm)
+    [[ "$*" == "confirm Authenticate with GitHub?" ]] && exit 0
+    exit 1
+    ;;
+  input) printf 'ghp_manual\n' ;;
+  spin) exit 0 ;;
+  *) exit 0 ;;
+esac
+SH
+
+  run_setup
+
+  assert_equals "ghp_manual" "$(cat "$TEST_TMP/gh-token")" "manual github token is piped to gh"
+  assert_file_contains "$TEST_TMP/gh-calls" "auth setup-git" "manual github setup configures git integration"
+  assert_file_contains "$TEST_TMP/output" "✓ GitHub" "manual github setup delegates to helper"
+  pass "GitHub manual helper"
+}
+
+test_ssh_key_only_writes_authorized_keys() {
+  new_env
+  write_common_fakes
+  write_gum <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TMP/gum-calls"
+case "$1" in
+  confirm)
+    [[ "$*" == "confirm Add SSH public key for remote access?" ]] && exit 0
+    exit 1
+    ;;
+  input) printf 'ssh-ed25519 AAAATEST test\n' ;;
+  spin) exit 0 ;;
+  *) exit 0 ;;
+esac
+SH
+
+  run_setup
+
+  assert_equals "ssh-ed25519 AAAATEST test" "$(cat "$TEST_HOME/.ssh/authorized_keys")" "ssh key is written to authorized_keys"
+  assert_file_not_contains "$TEST_TMP/output" "authorized_keys" "ssh setup does not print authorized_keys chatter"
+  assert_file_not_contains "$TEST_TMP/output" "ssh-keygen" "ssh setup does not generate host keys"
+  assert_file_not_contains "$TEST_TMP/sudo-calls" "sshd" "ssh setup does not touch sshd"
+  assert_file_contains "$TEST_TMP/output" "✓ SSH" "manual ssh setup delegates to helper"
+  pass "ssh setup only writes authorized_keys"
+}
+
+test_1password_service_token_path() {
+  new_env
+  write_common_fakes
+  write_gum <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TMP/gum-calls"
+case "$1" in
+  confirm)
+    [[ "$*" == "confirm Authenticate with 1Password?" ]] && exit 0
+    exit 1
+    ;;
+  choose) printf 'Use service token\n' ;;
+  input) printf 'ops_service\n' ;;
+  spin) exit 0 ;;
+  *) exit 0 ;;
+esac
+SH
+
+  run_setup
+
+  assert_file_contains "$TEST_TMP/gum-calls" "choose --header Choose 1password authentication Use service token Use full account details" "1password service path uses gum choose with header"
+  assert_file_not_contains "$TEST_TMP/gum-calls" "select" "1password service path does not use unsupported gum select"
+  assert_file_contains "$TEST_TMP/output" "✓ 1Password" "main setup delegates to omaterm-setup-1password"
+  assert_file_contains "$TEST_TMP/output" "✓ 1Password" "1password service token authenticates"
+  assert_file_not_contains "$TEST_TMP/op-calls" "account add" "service token path does not add account"
+  pass "1Password service token path"
+}
+
+test_1password_full_account_path() {
+  new_env
+  write_common_fakes
+  write_gum <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TMP/gum-calls"
+case "$1" in
+  confirm)
+    [[ "$*" == "confirm Authenticate with 1Password?" ]] && exit 0
+    exit 1
+    ;;
+  choose) printf 'Use full account details\n' ;;
+  input)
+    case "$*" in
+      *"1Password sign-in address"*) printf 'my.1password.com\n' ;;
+      *"1Password email"*) printf 'me@example.com\n' ;;
+      *"1Password secret key"*) printf 'A3-SECRET\n' ;;
+      *"1Password account shorthand"*) printf 'my\n' ;;
+      *"1Password password"*) printf 'super-secret-password\n' ;;
+      *) printf '\n' ;;
+    esac
+    ;;
+  spin) exit 130 ;;
+  *) exit 0 ;;
+esac
+SH
+
+  HOME="$TEST_HOME" PATH="$TEST_BIN:$ROOT/bin:$PATH" script -qfec "$SCRIPT" "$TEST_TMP/typescript" >/dev/null 2>&1 || true
+
+  assert_file_contains "$TEST_TMP/op-calls" "account add --address my.1password.com --email me@example.com --secret-key A3-SECRET --signin --shorthand my" "full account path adds account with details"
+  assert_equals "super-secret-password" "$(cat "$TEST_TMP/op-password")" "full account password is piped to op"
+  assert_file_not_contains "$TEST_TMP/typescript" $'\033]52;c;' "full account path does not copy setup data"
+  pass "1Password full account path"
+}
+
+main() {
+  test_env_seed_unattended
+  test_env_seed_does_not_prompt_for_missing_tailscale_hostname
+  test_env_seed_failure_does_not_fall_back_to_interactive_setup
+  test_ctrl_c_skips_setup
+  test_confirm_interrupt_status_skips_setup
+  test_ctrl_c_after_manual_progress_finishes_setup
+  test_ctrl_c_after_tailscale_hostname_finishes_setup
+  test_git_manual_uses_helper
+  test_tailscale_manual_requires_auth_key_and_no_sudo_for_hostname
+  test_github_manual_uses_helper
+  test_ssh_key_only_writes_authorized_keys
+  test_1password_service_token_path
+  test_1password_full_account_path
+}
+
+main "$@"

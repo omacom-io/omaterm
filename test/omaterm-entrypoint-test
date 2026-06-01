@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENTRYPOINT="$ROOT/bin/omaterm-entrypoint"
+DOCKERFILE="$ROOT/Dockerfile"
+
+fail() {
+  echo "not ok - $1" >&2
+  exit 1
+}
+
+pass() {
+  echo "ok - $1"
+}
+
+line_of() {
+  local file="$1" pattern="$2"
+  grep -nxF "$pattern" "$file" | head -n1 | cut -d: -f1
+}
+
+grep -qF 'NOPASSWD: ALL' "$DOCKERFILE" ||
+  fail "Docker image should keep passwordless sudo inside Omaterm"
+
+if grep -qF 'passwd omaterm' "$ENTRYPOINT"; then
+  fail "entrypoint should not ask for a sudo password"
+fi
+
+if grep -qF 'omaterm-tailscale' "$ENTRYPOINT"; then
+  fail "entrypoint should not add a separate tailscale sudoers rule"
+fi
+
+if grep -qF 'OMATERM_DOCKER' "$ENTRYPOINT" "$DOCKERFILE" "$ROOT/bin/omaterm-setup-tailscale"; then
+  fail "Docker-only setup should not need a native-vs-Docker mode flag"
+fi
+
+grep -qF 'start_tailscaled' "$ENTRYPOINT" ||
+  fail "entrypoint should start tailscaled before setup"
+
+setup_line="$(grep -nF '/home/omaterm/.local/bin/omaterm-setup' "$ENTRYPOINT" | tail -n1 | cut -d: -f1)"
+tailscaled_line="$(line_of "$ENTRYPOINT" 'start_tailscaled')"
+handoff_line="$(grep -nF 'bash -l "$@"' "$ENTRYPOINT" | head -n1 | cut -d: -f1)"
+[[ -n $setup_line && -n $handoff_line ]] && (( setup_line < handoff_line )) ||
+  fail "entrypoint should run setup before shell handoff"
+
+[[ -n $tailscaled_line && -n $setup_line ]] && (( tailscaled_line < setup_line )) ||
+  fail "entrypoint should start tailscaled before setup"
+
+grep -qF 'runuser -u omaterm -- env "${SETUP_ENV[@]}"' "$ENTRYPOINT" ||
+  fail "entrypoint should run setup as omaterm"
+
+grep -qF 'exec runuser -u omaterm -- env "${OMATERM_ENV[@]}" bash -l "$@"' "$ENTRYPOINT" ||
+  fail "entrypoint should hand off to login bash as omaterm"
+
+grep -qF 'TERM="${TERM:-xterm-256color}"' "$ENTRYPOINT" ||
+  fail "entrypoint should default missing TERM to xterm-256color"
+
+grep -qF 'OMATERM_SETUP_GIT_NAME' "$ENTRYPOINT" ||
+  fail "entrypoint should forward seeded setup env"
+
+grep -qF 'OMATERM_SETUP_TS_HOST' "$ENTRYPOINT" ||
+  fail "entrypoint should forward seeded Tailscale hostname"
+
+pass "entrypoint tailscale and shell handoff contracts"

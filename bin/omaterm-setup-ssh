@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SETUP_HELPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bin/omaterm-setup-helper
+source "$SETUP_HELPER_DIR/omaterm-setup-helper"
+
+KEY=""
+
+usage() {
+  echo "Usage: omaterm-setup-ssh [--key PUBLIC_KEY]" >&2
+}
+
+while (($#)); do
+  case "$1" in
+    --key)
+      KEY="${2:-}"
+      shift 2
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+install_ssh_key() {
+  local ssh_key="$1"
+
+  [[ -n $ssh_key ]] || return 0
+
+  mkdir -p "$HOME/.ssh" || return 1
+  chmod 700 "$HOME/.ssh" || return 1
+  touch "$HOME/.ssh/authorized_keys" || return 1
+  chmod 600 "$HOME/.ssh/authorized_keys" || return 1
+
+  if grep -qxF "$ssh_key" "$HOME/.ssh/authorized_keys"; then
+    return
+  else
+    echo "$ssh_key" >>"$HOME/.ssh/authorized_keys" || return 1
+  fi
+}
+
+setup_ssh_public_key() {
+  local ssh_key="$KEY"
+
+  if [[ -z $ssh_key ]]; then
+    gum_input_into ssh_key --placeholder "ssh-ed25519 AAAAC3..." --prompt "SSH key: " || return 1
+  fi
+  [[ -n $ssh_key ]] || {
+    return
+  }
+
+  install_ssh_key "$ssh_key" || return 1
+
+  echo "✓ SSH"
+  echo
+}
+
+setup_ssh_public_key

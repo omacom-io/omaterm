@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SETUP_HELPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bin/omaterm-setup-helper
+source "$SETUP_HELPER_DIR/omaterm-setup-helper"
+
+NAME=""
+EMAIL=""
+
+usage() {
+  echo "Usage: omaterm-setup-git [--name NAME --email EMAIL]" >&2
+}
+
+while (($#)); do
+  case "$1" in
+    --name)
+      NAME="${2:-}"
+      shift 2
+      ;;
+    --email)
+      EMAIL="${2:-}"
+      shift 2
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+setup_git_identity() {
+  local git_name="$NAME" git_email="$EMAIL"
+
+  git_name="${git_name:-$(git config --global user.name 2>/dev/null || true)}"
+  git_email="${git_email:-$(git config --global user.email 2>/dev/null || true)}"
+
+  while [[ -z $git_name ]]; do
+    gum_input_into git_name --prompt "Git Name: " || return 1
+  done
+
+  while [[ -z $git_email ]]; do
+    gum_input_into git_email --prompt "Git Email: " || return 1
+  done
+
+  git config --global user.name "$git_name" || return 1
+  git config --global user.email "$git_email" || return 1
+
+  if [[ -n $NAME || -n $EMAIL ]]; then
+    echo "✓ Git"
+  else
+    echo "✓ Git"
+    echo
+  fi
+}
+
+setup_git_identity

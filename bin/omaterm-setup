@@ -1,179 +1,130 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MARKER="$HOME/.omaterm-setup-done"
-TAILSCALE_HOSTNAME_FILE="/etc/omaterm-tailscale-hostname"
-GITHUB_TOKEN_URL="https://github.com/settings/tokens/new?description=Omaterm&scopes=repo,read:org,gist,write:packages"
+SETUP_DONE_MARKER="$HOME/.local/state/omaterm/setup-done"
 
-if [ -f "$MARKER" ]; then
+SETUP_UNATTENDED=0
+SETUP_FINISHED=0
+
+if [[ -f $SETUP_DONE_MARKER ]]; then
   exit 0
 fi
 
-setup_git_identity() {
-  if git config --global user.name &>/dev/null && git config --global user.email &>/dev/null; then
-    return
+banner() {
+  clear
+  echo
+  echo " ▄██████▄    ▄▄▄▄███▄▄▄▄      ▄████████     ███        ▄████████    ▄████████   ▄▄▄▄███▄▄▄▄
+███    ███ ▄██▀▀▀███▀▀▀██▄   ███    ███ ▀█████████▄   ███    ███   ███    ███ ▄██▀▀▀███▀▀▀██▄
+███    ███ ███   ███   ███   ███    ███    ▀███▀▀██   ███    █▀    ███    ███ ███   ███   ███
+███    ███ ███   ███   ███   ███    ███     ███   ▀  ▄███▄▄▄      ▄███▄▄▄▄██▀ ███   ███   ███
+███    ███ ███   ███   ███ ▀███████████     ███     ▀▀███▀▀▀     ▀▀███▀▀▀▀▀   ███   ███   ███
+███    ███ ███   ███   ███   ███    ███     ███       ███    █▄  ▀███████████ ███   ███   ███
+███    ███ ███   ███   ███   ███    ███     ███       ███    ███   ███    ███ ███   ███   ███
+ ▀██████▀   ▀█   ███   █▀    ███    █▀     ▄████▀     ██████████   ███    ███  ▀█   ███   █▀
+                                                                   ███    ███                "
+  echo
+}
+
+setup_unattended() {
+  [[ -n ${OMATERM_SETUP_GIT_NAME:-} ||
+    -n ${OMATERM_SETUP_GIT_EMAIL:-} ||
+    -n ${OMATERM_SETUP_GH_TOKEN:-} ||
+    -n ${OMATERM_SETUP_TS_AUTH_KEY:-} ||
+    -n ${OMATERM_SETUP_TS_HOST:-} ||
+    -n ${OMATERM_SETUP_OP_TOKEN:-} ||
+    -n ${OMATERM_SETUP_SSH_KEY:-} ]] || return 1
+
+  SETUP_UNATTENDED=1
+
+  if [[ -n ${OMATERM_SETUP_TS_AUTH_KEY:-} && -n ${OMATERM_SETUP_TS_HOST:-} ]]; then
+    omaterm-setup-tailscale --auth-key "$OMATERM_SETUP_TS_AUTH_KEY" || exit 1
   fi
 
-  if gum confirm "Identify for Git?"; then
-    local git_name="$(git config --global user.name 2>/dev/null || true)"
-    local git_email="$(git config --global user.email 2>/dev/null || true)"
+  if [[ -n ${OMATERM_SETUP_GIT_NAME:-} && -n ${OMATERM_SETUP_GIT_EMAIL:-} ]]; then
+    omaterm-setup-git --name "$OMATERM_SETUP_GIT_NAME" --email "$OMATERM_SETUP_GIT_EMAIL" || exit 1
+  fi
 
-    while [ -z "$git_name" ]; do
-      git_name="$(gum input --prompt "Git Name: ")"
-    done
+  if [[ -n ${OMATERM_SETUP_GH_TOKEN:-} ]]; then
+    omaterm-setup-github --token "$OMATERM_SETUP_GH_TOKEN" || exit 1
+  fi
 
-    while [ -z "$git_email" ]; do
-      git_email="$(gum input --prompt "Git Email: ")"
-    done
+  if [[ -n ${OMATERM_SETUP_SSH_KEY:-} ]]; then
+    omaterm-setup-ssh --key "$OMATERM_SETUP_SSH_KEY" || exit 1
+  fi
 
-    git config --global user.name "$git_name" || return 1
-    git config --global user.email "$git_email" || return 1
-    echo "✓ Git"
-    echo
+  if [[ -n ${OMATERM_SETUP_OP_TOKEN:-} ]]; then
+    omaterm-setup-1password --service-token "$OMATERM_SETUP_OP_TOKEN" || exit 1
   fi
 }
 
-setup_gh_authentication() {
-  if ! gh auth status &>/dev/null && gum confirm "Authenticate with GitHub?"; then
-    local github_token
+gum_confirm() {
+  local status interrupted=0
 
-    echo
-    echo "Use classic token with repo, read:org, gist, and write:packages scopes:"
-    echo "$GITHUB_TOKEN_URL"
-    echo
+  set +e
+  trap 'interrupted=1' INT
+  gum confirm "$@"
+  status=$?
+  trap - INT
+  set -e
 
-    while [ -z "${github_token:-}" ]; do
-      github_token="$(gum input --password --prompt "GitHub token: ")"
-    done
-
-    printf '%s' "$github_token" | gh auth login --hostname github.com --with-token || return 1
-    gh auth setup-git || return 1
-    echo "✓ GitHub"
-    echo
+  if (( interrupted || status == 130 || status > 1 )); then
+    SETUP_FINISHED=1
+    return 130
   fi
+
+  return "$status"
+}
+
+run_setup_helper() {
+  local helper="$1" status
+  shift
+
+  set +e
+  "$helper" "$@"
+  status=$?
+  set -e
+
+  if (( status == 130 || status > 1 )); then
+    SETUP_FINISHED=1
+    return 1
+  elif (( status != 0 )); then
+    return 1
+  fi
+}
+
+setup_git_identity() {
+  git config --global user.name &>/dev/null && git config --global user.email &>/dev/null && return
+  gum_confirm "Identify for Git?" || return 0
+  run_setup_helper omaterm-setup-git || return 1
+}
+
+setup_gh_authentication() {
+  gh auth status &>/dev/null && return
+  gum_confirm "Authenticate with GitHub?" || return 0
+  run_setup_helper omaterm-setup-github || return 1
 }
 
 setup_tailscale() {
   tailscale status &>/dev/null && return
-
-  if gum confirm "Connect to Tailscale?"; then
-    if [ "${OMATERM_DOCKER:-}" = "1" ] || [ -f /.dockerenv ]; then
-      sudo mkdir -p /var/lib/tailscale /var/run/tailscale || return 1
-      sudo rm -f /var/run/tailscale/tailscaled.sock || return 1
-      sudo sh -c 'tailscaled --tun=userspace-networking --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock >/tmp/tailscaled.log 2>&1 &' || return 1
-    elif systemctl cat tailscaled.service &>/dev/null; then
-      sudo systemctl daemon-reload || return 1
-      sudo systemctl enable --now tailscaled.service || return 1
-    else
-      sudo sh -c 'tailscaled >/tmp/tailscaled.log 2>&1 &' || return 1
-    fi
-
-    local current_name="$(cat "$TAILSCALE_HOSTNAME_FILE" 2>/dev/null || true)"
-    current_name="${current_name:-$(hostname)}"
-
-    while true; do
-      echo
-      local tailnet_hostname="$(gum input --prompt "Tailnet hostname: " --value "$current_name")"
-      tailnet_hostname="${tailnet_hostname:-$current_name}"
-
-      if [[ "$tailnet_hostname" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$ ]]; then
-        printf "%s\n" "$tailnet_hostname" | sudo tee "$TAILSCALE_HOSTNAME_FILE" >/dev/null || return 1
-        break
-      fi
-
-      echo "Use letters, numbers, and hyphens only, starting with a letter or number."
-    done
-
-    local tailscale_args=(--ssh --accept-routes --hostname="$tailnet_hostname")
-
-    echo
-    echo "Bringing up Tailscale..."
-    sudo tailscale up "${tailscale_args[@]}" || return 1
-    echo "✓ Tailscale"
-    echo
-  fi
+  gum_confirm "Connect to Tailscale?" || return 0
+  run_setup_helper omaterm-setup-tailscale || return 1
 }
 
 setup_ssh_public_key() {
-  local ssh_key
-
-  if gum confirm "Replace password with SSH public key for remote access?"; then
-    mkdir -p "$HOME/.ssh" || return 1
-    chmod 700 "$HOME/.ssh" || return 1
-
-    ssh_key="$(gum input --placeholder "ssh-ed25519 AAAAC3..." --prompt "SSH key: ")"
-    if [ -z "$ssh_key" ]; then
-      return
-    fi
-
-    touch "$HOME/.ssh/authorized_keys" || return 1
-    chmod 600 "$HOME/.ssh/authorized_keys" || return 1
-
-    if grep -qxF "$ssh_key" "$HOME/.ssh/authorized_keys"; then
-      echo "SSH key already present in authorized_keys."
-    else
-      echo "$ssh_key" >>"$HOME/.ssh/authorized_keys" || return 1
-      echo "SSH key added to authorized_keys."
-    fi
-
-    if sudo sshd -T 2>/dev/null | grep -q '^passwordauthentication no'; then
-      return
-    fi
-
-    if ! gum confirm "Disable password authentication for SSH (key-based auth only)?"; then
-      return
-    fi
-
-    if [ -d /etc/ssh/sshd_config.d ]; then
-      printf 'PasswordAuthentication no\nKbdInteractiveAuthentication no\nPubkeyAuthentication yes\n' |
-        sudo tee /etc/ssh/sshd_config.d/99-omaterm.conf >/dev/null || return 1
-    else
-      sudo sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config || return 1
-      sudo sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config || return 1
-    fi
-
-    # Confirm the effective config actually disabled password auth before reporting success.
-    if ! sudo sshd -T 2>/dev/null | grep -q '^passwordauthentication no'; then
-      echo "Error: password authentication is still enabled in the effective sshd config." >&2
-      echo "Check for overrides in /etc/ssh/sshd_config and /etc/ssh/sshd_config.d/*.conf." >&2
-      return 1
-    fi
-
-    sudo systemctl restart sshd.service || return 1
-
-    echo "✓ SSH"
-    echo
-  fi
+  gum_confirm "Add SSH public key for remote access?" || return 0
+  run_setup_helper omaterm-setup-ssh || return 1
 }
 
 setup_1password() {
-  op whoami &>/dev/null && return 0
-
-  if gum confirm "Authenticate with 1Password?"; then
-    local session
-
-    if ! op account list --format json 2>/dev/null | jq -e 'length > 0' >/dev/null; then
-      # Enroll the account interactively. Don't capture stdout: with stdout
-      # redirected (as in `eval "$(...)"`) op switches to non-interactive mode
-      # and fails with "missing --address flag" instead of prompting.
-      op account add || return 1
-    fi
-
-    # `op signin` is the command designed to be eval'd: it prints the session
-    # token as shell exports on stdout while prompting on the tty. Capture it to
-    # a variable so a real failure is detected (eval of an empty string would
-    # otherwise succeed and mask the error).
-    session="$(op signin)" || return 1
-    eval "$session"
-
-    echo "✓ 1Password"
-    echo
-  fi
+  gum_confirm "Authenticate with 1Password?" || return 0
+  run_setup_helper omaterm-setup-1password || return 1
 }
 
 run_setup_section() {
   local label="$1"
   shift
+
+  (( SETUP_FINISHED )) && return 0
 
   if "$@"; then
     return 0
@@ -185,29 +136,30 @@ run_setup_section() {
   return 0
 }
 
-clear
-echo
-echo " ▄██████▄    ▄▄▄▄███▄▄▄▄      ▄████████     ███        ▄████████    ▄████████   ▄▄▄▄███▄▄▄▄
-███    ███ ▄██▀▀▀███▀▀▀██▄   ███    ███ ▀█████████▄   ███    ███   ███    ███ ▄██▀▀▀███▀▀▀██▄
-███    ███ ███   ███   ███   ███    ███    ▀███▀▀██   ███    █▀    ███    ███ ███   ███   ███
-███    ███ ███   ███   ███   ███    ███     ███   ▀  ▄███▄▄▄      ▄███▄▄▄▄██▀ ███   ███   ███
-███    ███ ███   ███   ███ ▀███████████     ███     ▀▀███▀▀▀     ▀▀███▀▀▀▀▀   ███   ███   ███
-███    ███ ███   ███   ███   ███    ███     ███       ███    █▄  ▀███████████ ███   ███   ███
-███    ███ ███   ███   ███   ███    ███     ███       ███    ███   ███    ███ ███   ███   ███
- ▀██████▀   ▀█   ███   █▀    ███    █▀     ▄████▀     ██████████   ███    ███  ▀█   ███   █▀
-                                                                   ███    ███                "
-echo
-echo "Welcome to Omaterm! Let's get you set up."
-echo
+setup_interactively() {
+  run_setup_section "Git identity" setup_git_identity
+  run_setup_section "GitHub authentication" setup_gh_authentication
+  run_setup_section "Tailscale setup" setup_tailscale
+  run_setup_section "SSH key setup" setup_ssh_public_key
+  run_setup_section "1Password authentication" setup_1password
+}
 
-# Git identity
-run_setup_section "Git identity" setup_git_identity
-run_setup_section "GitHub authentication" setup_gh_authentication
-run_setup_section "Tailscale setup" setup_tailscale
-run_setup_section "SSH key setup" setup_ssh_public_key
-run_setup_section "1Password authentication" setup_1password
+finish_setup() {
+  mkdir -p "$(dirname "$SETUP_DONE_MARKER")"
+  touch "$SETUP_DONE_MARKER"
 
-echo
-gum spin --spinner "globe" --title "Setup done! Press any key to tmux..." -- bash -c 'read -n 1 -s </dev/tty'
+  echo
+  if (( SETUP_UNATTENDED )); then
+    return
+  elif [ -t 0 ] && [ -r /dev/tty ]; then
+    gum spin --spinner "globe" --title "Setup complete. Press any key to tmux..." -- bash -c 'read -n 1 -s </dev/tty'
+  else
+    echo "Setup complete"
+  fi
+}
 
-touch "$MARKER"
+banner
+
+setup_unattended || setup_interactively
+
+finish_setup

@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SETUP_HELPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bin/omaterm-setup-helper
+source "$SETUP_HELPER_DIR/omaterm-setup-helper"
+
+TAILSCALE_HOSTNAME_FILE="$HOME/.local/state/omaterm/tailscale-hostname"
+AUTH_KEY=""
+
+usage() {
+  echo "Usage: omaterm-setup-tailscale [--auth-key AUTH_KEY]" >&2
+}
+
+while (($#)); do
+  case "$1" in
+    --auth-key)
+      AUTH_KEY="${2:-}"
+      shift 2
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+tailscale_up() {
+  sudo -n tailscale up "$@" || return 1
+}
+
+prompt_hostname() {
+  local -n target="$1"
+  local current_name entered_hostname
+
+  if [[ -n ${OMATERM_SETUP_TS_HOST:-} ]]; then
+    if [[ $OMATERM_SETUP_TS_HOST =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$ ]]; then
+      mkdir -p "$(dirname "$TAILSCALE_HOSTNAME_FILE")" || return 1
+      printf "%s\n" "$OMATERM_SETUP_TS_HOST" >"$TAILSCALE_HOSTNAME_FILE" || return 1
+      target="$OMATERM_SETUP_TS_HOST"
+      return
+    fi
+
+    echo "Invalid OMATERM_SETUP_TS_HOST. Use letters, numbers, and hyphens only, starting with a letter or number." >&2
+    return 1
+  fi
+
+  current_name="$(cat "$TAILSCALE_HOSTNAME_FILE" 2>/dev/null || true)"
+  current_name="${current_name:-$(hostname)}"
+
+  while true; do
+    echo >&2
+    gum_input_into entered_hostname --prompt "Tailnet hostname: " --value "$current_name" || return 1
+    entered_hostname="${entered_hostname:-$current_name}"
+
+    if [[ $entered_hostname =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$ ]]; then
+      mkdir -p "$(dirname "$TAILSCALE_HOSTNAME_FILE")" || return 1
+      printf "%s\n" "$entered_hostname" >"$TAILSCALE_HOSTNAME_FILE" || return 1
+      target="$entered_hostname"
+      return
+    fi
+
+    echo "Use letters, numbers, and hyphens only, starting with a letter or number." >&2
+  done
+}
+
+setup_tailscale() {
+  local tailnet_hostname="" tailscale_auth_key="$AUTH_KEY"
+
+  if tailscale status &>/dev/null; then
+    return 0
+  fi
+
+  prompt_hostname tailnet_hostname || return 1
+  [[ -n $tailnet_hostname ]] || return 1
+
+  while [[ -z $tailscale_auth_key ]]; do
+    echo "Grab a new auth key from the 'generate install script' block on:"
+    echo "https://login.tailscale.com/admin/machines/new-linux"
+    echo
+
+    gum_input_into tailscale_auth_key --password --placeholder "tskey-auth-kMyk..." --prompt "Tailscale auth key: " || return 1
+  done
+
+  echo
+  echo "Bringing up Tailscale..."
+  tailscale_up --ssh --accept-routes --hostname="$tailnet_hostname" --auth-key="$tailscale_auth_key" || return 1
+
+  echo "✓ Tailscale"
+  echo
+}
+
+setup_tailscale
