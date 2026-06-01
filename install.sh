@@ -13,7 +13,6 @@ banner() {
 ███    ███ ███   ███   ███   ███    ███     ███       ███    ███   ███    ███ ███   ███   ███
  ▀██████▀   ▀█   ███   █▀    ███    █▀     ▄████▀     ██████████   ███    ███  ▀█   ███   █▀ 
                                                                    ███    ███                "
-  echo -e "\n==> Installing Omaterm..."
 }
 
 section() {
@@ -37,6 +36,8 @@ is_wsl() {
 }
 
 install_docker_packages() {
+  section "Installing Docker..."
+
   if is_wsl; then
     if docker info >/dev/null 2>&1; then
       return
@@ -50,14 +51,11 @@ install_docker_packages() {
   fi
 
   if is_arch; then
-    section "Installing Docker..."
     sudo pacman -S --needed --noconfirm docker
   elif is_debian; then
-    section "Installing Docker..."
     sudo apt-get update
     sudo apt-get install -y docker.io
   elif is_fedora; then
-    section "Installing Docker..."
     sudo dnf install -y moby-engine
   else
     echo "Error: This OS is not supported by the installer."
