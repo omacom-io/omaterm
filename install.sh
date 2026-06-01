@@ -108,6 +108,7 @@ run_docker_installation() {
     sudo systemctl enable --now docker.service
     sudo groupadd -f docker
     sudo usermod -aG docker "${USER:-$(id -un)}"
+    newgrp docker
     echo "✓ Docker"
   fi
 
