@@ -151,8 +151,7 @@ test_default_creates_omaterm() {
 
   run_omaterm
 
-  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name omaterm --label omaterm=1 --net host $LIMITS_ONE omaterm:test" "default command creates omaterm"
-  assert_file_not_contains "$TEST_TMP/docker-actions" "/var/run/docker.sock" "default command does not mount host Docker"
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name omaterm --label omaterm=1 --net host $LIMITS_ONE -v /var/run/docker.sock:/var/run/docker.sock omaterm:test" "default command creates omaterm with host Docker mounted"
   pass "default creates omaterm"
 }
 
@@ -342,7 +341,7 @@ test_no_limits_opts_out() {
 
   assert_file_not_contains "$TEST_TMP/docker-actions" "--cpuset-cpus" "no-limits omits cpuset"
   assert_file_not_contains "$TEST_TMP/docker-actions" "--memory" "no-limits omits memory cap"
-  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name omaterm --label omaterm=1 --net host omaterm:test" "no-limits runs without resource flags"
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name omaterm --label omaterm=1 --net host -v /var/run/docker.sock:/var/run/docker.sock omaterm:test" "no-limits runs without resource flags"
   pass "no-limits opts out"
 }
 
@@ -356,7 +355,7 @@ test_reserve_overrides() {
   )
 
   # Reserve 2 cores (cpuset 2-19) and 4096 MB ((65536 - 4096) = 61440 MB).
-  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name omaterm --label omaterm=1 --net host --cpuset-cpus 2-19 --cpu-shares 1024 --memory 61440m --memory-swap 61440m omaterm:test" "host reserve is configurable"
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name omaterm --label omaterm=1 --net host --cpuset-cpus 2-19 --cpu-shares 1024 --memory 61440m --memory-swap 61440m -v /var/run/docker.sock:/var/run/docker.sock omaterm:test" "host reserve is configurable"
   pass "reserve overrides"
 }
 

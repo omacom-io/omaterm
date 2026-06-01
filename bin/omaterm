@@ -410,7 +410,7 @@ run_start() {
   mapfile -t names < <(omaterm_names)
 
   if ((${#names[@]} == 0)); then
-    run_new "$DEFAULT_NAME"
+    run_new "$DEFAULT_NAME" -d
   fi
 
   name="$(choose_omaterm "Start" "${names[@]}")"
