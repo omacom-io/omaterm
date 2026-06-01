@@ -5,6 +5,10 @@ IMAGE="${OMATERM_IMAGE:-ghcr.io/omacom-io/omaterm}"
 DEFAULT_NAME="omaterm"
 LABEL="omaterm=1"
 PREPARE_DONE_MARKER="/home/omaterm/.local/state/omaterm/prepare-done"
+SETUP_DONE_MARKER="/home/omaterm/.local/state/omaterm/setup-done"
+TAILSCALE_STATE_FILE="/var/lib/tailscale/tailscaled.state"
+TAILSCALE_HOSTNAME_FILE="/home/omaterm/.local/state/omaterm/tailscale-hostname"
+CLONE_IMAGE_REPO="omaterm-clone"
 
 # Resource limits. The host keeps a reserved slice for itself; the rest is
 # divided across all Omaterms. CPU is shared dynamically with cpu-shares over
@@ -21,6 +25,11 @@ usage() {
 Usage:
   omaterm
   omaterm new NAME [-d|--docker-access] [-p|--prepare COMMAND]
+    [--op ITEM]
+    [--git-name NAME] [--git-email EMAIL] [--gh-token TOKEN]
+    [--ts-token TOKEN] [--ts-host HOSTNAME] [--op-token TOKEN]
+    [--ssh-key PUBLIC_KEY]
+  omaterm clone NAME --as NEWNAME [-d|--docker-access]
     [--op ITEM]
     [--git-name NAME] [--git-email EMAIL] [--gh-token TOKEN]
     [--ts-token TOKEN] [--ts-host HOSTNAME] [--op-token TOKEN]
@@ -280,95 +289,18 @@ run_new() {
 
   while (($#)); do
     case "$1" in
-      --op)
-        [[ -n ${2:-} ]] || {
-          usage
-          exit 2
-        }
-        setup_op="${2:-}"
-        shift 2
-        ;;
-      -p | --prepare)
-        [[ -n ${2:-} ]] || {
-          usage
-          exit 2
-        }
-        prepare=1
-        prepare_command="${2:-}"
-        shift 2
-        ;;
-      --ts-host)
-        [[ -n ${2:-} ]] || {
-          usage
-          exit 2
-        }
-        tailscale_host="${2:-}"
-        shift 2
-        ;;
-      --git-name)
-        [[ -n ${2:-} ]] || {
-          usage
-          exit 2
-        }
-        git_name="${2:-}"
-        shift 2
-        ;;
-      --git-email)
-        [[ -n ${2:-} ]] || {
-          usage
-          exit 2
-        }
-        git_email="${2:-}"
-        shift 2
-        ;;
-      --gh-token)
-        [[ -n ${2:-} ]] || {
-          usage
-          exit 2
-        }
-        gh_token="${2:-}"
-        shift 2
-        ;;
-      --ts-token)
-        [[ -n ${2:-} ]] || {
-          usage
-          exit 2
-        }
-        ts_token="${2:-}"
-        shift 2
-        ;;
-      --op-token)
-        [[ -n ${2:-} ]] || {
-          usage
-          exit 2
-        }
-        op_token="${2:-}"
-        shift 2
-        ;;
-      --ssh-key)
-        [[ -n ${2:-} ]] || {
-          usage
-          exit 2
-        }
-        ssh_key="${2:-}"
-        shift 2
-        ;;
-      -d | --docker-access)
-        mount_docker=1
-        shift
-        ;;
-      *)
-        if [[ $1 == -* ]]; then
-          usage
-          exit 2
-        elif [[ -z $name ]]; then
-          name="$1"
-          shift
-        else
-          usage
-          exit 2
-        fi
-        ;;
+      --op)                 setup_op="${2:-}"; shift 2 ;;
+      -p | --prepare)       prepare=1; prepare_command="${2:-}"; shift 2 ;;
+      --ts-host)            tailscale_host="${2:-}"; shift 2 ;;
+      --git-name)           git_name="${2:-}"; shift 2 ;;
+      --git-email)          git_email="${2:-}"; shift 2 ;;
+      --gh-token)           gh_token="${2:-}"; shift 2 ;;
+      --ts-token)           ts_token="${2:-}"; shift 2 ;;
+      --op-token)           op_token="${2:-}"; shift 2 ;;
+      --ssh-key)            ssh_key="${2:-}"; shift 2 ;;
+      -d | --docker-access) mount_docker=1; shift ;;
+      -*)                   usage; exit 2 ;;
+      *)                    name="$1"; shift ;;
     esac
   done
 
@@ -448,6 +380,95 @@ run_new() {
       "$IMAGE" \
       "${command_args[@]}"
   fi
+}
+
+run_clone() {
+  local source="" name="" overrides=0 image existing reset_cmd
+  local setup_op="" mount_docker=0
+  local git_name="" git_email="" gh_token="" ts_token="" tailscale_host="" op_token="" ssh_key=""
+  local env_args=() docker_args=()
+
+  while (($#)); do
+    case "$1" in
+      --as)               name="${2:-}"; shift 2 ;;
+      --op)               setup_op="${2:-}"; overrides=1; shift 2 ;;
+      --ts-host)          tailscale_host="${2:-}"; overrides=1; shift 2 ;;
+      --git-name)         git_name="${2:-}"; overrides=1; shift 2 ;;
+      --git-email)        git_email="${2:-}"; overrides=1; shift 2 ;;
+      --gh-token)         gh_token="${2:-}"; overrides=1; shift 2 ;;
+      --ts-token)         ts_token="${2:-}"; overrides=1; shift 2 ;;
+      --op-token)         op_token="${2:-}"; overrides=1; shift 2 ;;
+      --ssh-key)          ssh_key="${2:-}"; overrides=1; shift 2 ;;
+      -d | --docker-access) mount_docker=1; shift ;;
+      -*)                 usage; exit 2 ;;
+      *)                  source="$1"; shift ;;
+    esac
+  done
+
+  [[ -n $source && -n $name ]] || { usage; exit 2; }
+
+  validate_name "$source"
+  validate_name "$name"
+
+  container_exists "$source" || {
+    echo "No such Omaterm: $source" >&2
+    exit 1
+  }
+
+  if container_exists "$name"; then
+    echo "Omaterm already exists: $name" >&2
+    exit 1
+  fi
+
+  if [[ -n $setup_op ]]; then
+    load_setup_from_op "$setup_op"
+  fi
+
+  # Snapshot the source's filesystem into a fresh image to launch the clone from.
+  image="$CLONE_IMAGE_REPO:$name"
+  echo "==> Cloning $source into $name..." >&2
+  docker commit "$source" "$image" >/dev/null
+
+  # Adding this Omaterm shrinks every existing Omaterm's memory share; re-divide
+  # them before launching, then claim the same share for the clone.
+  mapfile -t existing < <(omaterm_names)
+  rebalance_limits "$((${#existing[@]} + 1))"
+  build_limit_args "$((${#existing[@]} + 1))"
+
+  if [ -t 0 ] && [ -r /dev/tty ]; then
+    exec </dev/tty
+  fi
+
+  # docker commit bakes the source's setup env (tokens) and Tailscale node
+  # identity into the image. Pass every setup var explicitly — empty unless
+  # overridden — so the inherited env can't silently re-apply, and always wipe
+  # the Tailscale state so the clone never shares the source's node.
+  env_args=(
+    -e "OMATERM_SETUP_TS_HOST=$tailscale_host"
+    -e "OMATERM_SETUP_GIT_NAME=$git_name"
+    -e "OMATERM_SETUP_GIT_EMAIL=$git_email"
+    -e "OMATERM_SETUP_GH_TOKEN=$gh_token"
+    -e "OMATERM_SETUP_TS_AUTH_KEY=$ts_token"
+    -e "OMATERM_SETUP_OP_TOKEN=$op_token"
+    -e "OMATERM_SETUP_SSH_KEY=$ssh_key"
+  )
+
+  (( mount_docker )) && docker_args+=(-v /var/run/docker.sock:/var/run/docker.sock)
+
+  # Reset the Tailscale identity, and clear the setup marker when overrides were
+  # given so omaterm-setup re-runs and applies them on first boot.
+  reset_cmd="rm -f $TAILSCALE_STATE_FILE $TAILSCALE_HOSTNAME_FILE"
+  (( overrides )) && reset_cmd+=" $SETUP_DONE_MARKER"
+
+  exec docker run -it "${env_args[@]}" \
+    --name "$name" \
+    --label "$LABEL" \
+    --net host \
+    "${LIMIT_ARGS[@]}" \
+    "${docker_args[@]}" \
+    --entrypoint bash \
+    "$image" \
+    -c "$reset_cmd; exec /home/omaterm/.local/bin/omaterm-entrypoint"
 }
 
 connect_omaterm() {
@@ -576,6 +597,11 @@ run_exec() {
   exec docker exec "${docker_args[@]}" "$name" bash -lc "$command"
 }
 
+# Drop the snapshot image a clone was launched from, if it had one.
+remove_clone_image() {
+  docker image rm "$CLONE_IMAGE_REPO:$1" >/dev/null 2>&1 || true
+}
+
 run_rm() {
   local names name="${1:-}"
 
@@ -588,6 +614,9 @@ run_rm() {
     fi
 
     docker rm -f "${names[@]}"
+    for name in "${names[@]}"; do
+      remove_clone_image "$name"
+    done
     return
   elif [[ -n $name ]]; then
     validate_name "$name"
@@ -607,6 +636,7 @@ run_rm() {
   fi
 
   docker rm -f "$name"
+  remove_clone_image "$name"
 
   # One fewer Omaterm means a larger memory share for the survivors.
   mapfile -t names < <(omaterm_names)
@@ -616,6 +646,7 @@ run_rm() {
 case "${1:-}" in
   "")      run_connect ;;
   new)     run_new "${@:2}" ;;
+  clone)   run_clone "${@:2}" ;;
   connect) run_connect "${2:-}" ;;
   ls)      run_ls ;;
   exec)    run_exec "${@:2}" ;;
