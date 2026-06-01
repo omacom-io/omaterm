@@ -77,7 +77,7 @@ install_omaterm_command() {
 
   rm -f "$tmp_file"
 
-  echo "✓ omaterm command"
+  echo "✓ Command"
 }
 
 banner
