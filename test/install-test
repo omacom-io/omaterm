@@ -21,11 +21,21 @@ pass() {
 [[ ! -e $DOCKER_INSTALL ]] ||
   fail "separate Docker installer should not exist"
 
-grep -qF 'run_docker_installation' "$INSTALL" ||
+grep -qF 'install_docker' "$INSTALL" ||
   fail "installer should run Docker installation directly"
 
-grep -qF 'install_docker_packages' "$INSTALL" ||
+grep -qF 'sudo apt-get install -y docker.io' "$INSTALL" ||
   fail "installer should install Docker packages directly"
+
+grep -qF 'OMATERM_COMMAND=/usr/local/bin/omaterm' "$INSTALL" ||
+  fail "installer should put omaterm on the default system PATH"
+
+grep -qF 'install -D -m 0755 "$tmp_file" "$OMATERM_COMMAND"' "$INSTALL" ||
+  fail "installer should overwrite the omaterm command in place"
+
+if grep -qF '$HOME/.local/bin' "$INSTALL"; then
+  fail "installer should not rely on a shell rc PATH change"
+fi
 
 if grep -qE 'install-native|install-docker|Install natively|run_installer' "$INSTALL"; then
   fail "installer should not delegate to another installer"
@@ -34,6 +44,15 @@ fi
 if grep -qF 'exec "$HOME/.local/bin/omaterm"' "$INSTALL" || grep -qF 'exec newgrp docker' "$INSTALL"; then
   fail "installer should not launch omaterm after install"
 fi
+
+grep -qF 'sudo groupadd -f docker' "$INSTALL" ||
+  fail "installer should create the docker group"
+
+grep -qF 'sudo usermod -aG docker "${USER:-$(id -un)}"' "$INSTALL" ||
+  fail "installer should add the user to the docker group"
+
+grep -qF 'newgrp docker' "$INSTALL" ||
+  fail "installer should enter the docker group after setup"
 
 grep -qF 'Run omaterm to get started' "$INSTALL" ||
   fail "installer should tell the user how to start omaterm"

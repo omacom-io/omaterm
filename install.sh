@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+OMATERM_COMMAND=/usr/local/bin/omaterm
+
 banner() {
   clear
   echo
@@ -35,7 +37,7 @@ is_wsl() {
   grep -qi microsoft /proc/version 2>/dev/null
 }
 
-install_docker_packages() {
+install_docker() {
   section "Installing Docker..."
 
   if is_wsl; then
@@ -46,11 +48,11 @@ install_docker_packages() {
     echo "Error: Docker is not available."
     echo "Install and start Docker Desktop for Windows with WSL integration enabled, then re-run this installer."
     exit 1
-  elif command -v docker &>/dev/null && systemctl cat docker.service &>/dev/null; then
-    return
   fi
 
-  if is_arch; then
+  if command -v docker &>/dev/null && systemctl cat docker.service &>/dev/null; then
+    :
+  elif is_arch; then
     sudo pacman -S --needed --noconfirm docker
   elif is_debian; then
     sudo apt-get update
@@ -62,59 +64,42 @@ install_docker_packages() {
     echo "Install Docker manually, then run this installer again."
     exit 1
   fi
-}
 
-ensure_local_bin_on_path() {
-  local shell_rc="$HOME/.bashrc"
-  local path_line='export PATH="$HOME/.local/bin:$PATH"'
+  section "Enabling Docker..."
+  sudo systemctl enable --now docker.service
+  sudo groupadd -f docker
+  sudo usermod -aG docker "${USER:-$(id -un)}"
 
-  case ":$PATH:" in
-    *":$HOME/.local/bin:"*) return ;;
-  esac
-
-  touch "$shell_rc"
-
-  if ! grep -qF '$HOME/.local/bin' "$shell_rc"; then
-    printf '\n%s\n' "$path_line" >>"$shell_rc"
-  fi
+  echo
+  echo "✓ Docker"
 }
 
 install_omaterm_command() {
-  local bin_dir="$HOME/.local/bin"
-  local installer_dir raw_url
+  local raw_url tmp_file
 
-  mkdir -p "$bin_dir"
+  raw_url="https://raw.githubusercontent.com/omacom-io/omaterm/refs/heads/${OMATERM_REF:-master}/bin/omaterm"
+  tmp_file="$(mktemp)"
+  curl -fsSL "$raw_url" -o "$tmp_file"
 
-  installer_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  if [ -f "$installer_dir/bin/omaterm" ]; then
-    cp "$installer_dir/bin/omaterm" "$bin_dir/omaterm"
+  if ((EUID == 0)); then
+    install -D -m 0755 "$tmp_file" "$OMATERM_COMMAND"
   else
-    raw_url="https://raw.githubusercontent.com/omacom-io/omaterm/refs/heads/${OMATERM_REF:-master}/bin/omaterm"
-    curl -fsSL "$raw_url" -o "$bin_dir/omaterm"
+    sudo install -D -m 0755 "$tmp_file" "$OMATERM_COMMAND"
   fi
 
-  chmod +x "$bin_dir/omaterm"
-  ensure_local_bin_on_path
+  rm -f "$tmp_file"
+
   echo "✓ omaterm command"
 }
 
-run_docker_installation() {
-  install_docker_packages
-
-  if is_arch || is_debian || is_fedora; then
-    section "Enabling Docker..."
-    sudo systemctl enable --now docker.service
-    sudo groupadd -f docker
-    sudo usermod -aG docker "${USER:-$(id -un)}"
-    newgrp docker
-    echo "✓ Docker"
-  fi
-
-  install_omaterm_command
-
-  echo
-  echo "Run omaterm to get started"
-}
-
 banner
-run_docker_installation
+
+install_docker
+install_omaterm_command
+
+echo
+echo "Run omaterm to get started"
+
+if ! is_wsl; then
+  newgrp docker
+fi
