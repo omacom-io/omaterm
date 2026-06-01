@@ -21,18 +21,6 @@ section() {
   echo -e "\n==> $1"
 }
 
-is_arch() {
-  [ -f /etc/arch-release ]
-}
-
-is_debian() {
-  [ -f /etc/debian_version ]
-}
-
-is_fedora() {
-  [ -f /etc/fedora-release ]
-}
-
 is_wsl() {
   grep -qi microsoft /proc/version 2>/dev/null
 }
@@ -52,12 +40,12 @@ install_docker() {
 
   if command -v docker &>/dev/null && systemctl cat docker.service &>/dev/null; then
     :
-  elif is_arch; then
+  elif [ -f /etc/arch-release ]; then
     sudo pacman -S --needed --noconfirm docker
-  elif is_debian; then
+  elif [ -f /etc/debian_version ]; then
     sudo apt-get update
     sudo apt-get install -y docker.io
-  elif is_fedora; then
+  elif [ -f /etc/fedora-release ]; then
     sudo dnf install -y moby-engine
   else
     echo "Error: This OS is not supported by the installer."
