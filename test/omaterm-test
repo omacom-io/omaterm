@@ -105,6 +105,35 @@ SH
   chmod +x "$TEST_BIN/gum"
 }
 
+write_op() {
+  cat >"$TEST_BIN/op" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf '%s\n' "$*" >>"$TEST_TMP/op-calls"
+
+if [[ "$*" == "item get Omaterm Setup --format json" || "$*" == "item get Omaterm Setup --vault Personal --format json" ]]; then
+  cat <<'JSON'
+{
+  "fields": [
+    { "label": "git-name", "value": "Op User" },
+    { "section": { "label": "add more" }, "label": "git-email", "value": "op@example.com" },
+    { "section": { "label": "add more" }, "label": "gh-token", "value": "ghp_op" },
+    { "section": { "label": "add more" }, "label": "ts-token", "value": "tskey-op" },
+    { "section": { "label": "add more" }, "label": "ts-host", "value": "op-host" },
+    { "section": { "label": "add more" }, "label": "op-token", "value": "ops_op" },
+    { "section": { "label": "add more" }, "label": "ssh-key", "value": "ssh-ed25519 OPKEY op" }
+  ]
+}
+JSON
+  exit 0
+fi
+
+exit 1
+SH
+  chmod +x "$TEST_BIN/op"
+}
+
 run_omaterm() {
   PATH="$TEST_BIN:$PATH" OMATERM_IMAGE="omaterm:test" \
     OMATERM_TOTAL_CORES="${OMATERM_TOTAL_CORES:-20}" \
@@ -127,15 +156,60 @@ test_default_creates_omaterm() {
   pass "default creates omaterm"
 }
 
-test_new_with_setup_token() {
+test_new_with_setup_seed_args() {
   new_env
   write_docker
 
-  run_omaterm new omaterm2 -t token123 -h host2
+  run_omaterm new omaterm2 \
+    --git-name "Seed User" \
+    --git-email seed@example.com \
+    --gh-token ghp_seed \
+    --ts-token tskey-seed \
+    --ts-host seed-host \
+    --op-token ops_seed \
+    --ssh-key "ssh-ed25519 SEEDKEY seed"
 
-  assert_file_contains "$TEST_TMP/docker-actions" "run -it -e OMATERM_SETUP_TOKEN=token123 -e OMATERM_TS_HOSTNAME=host2 --name omaterm2 --label omaterm=1" "new passes setup token env"
-  assert_file_not_contains "$TEST_TMP/docker-actions" "/var/run/docker.sock" "new does not mount host Docker by default"
-  pass "new with setup token"
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it -e OMATERM_SETUP_TS_HOST=seed-host -e OMATERM_SETUP_GIT_NAME=Seed User -e OMATERM_SETUP_GIT_EMAIL=seed@example.com -e OMATERM_SETUP_GH_TOKEN=ghp_seed -e OMATERM_SETUP_TS_AUTH_KEY=tskey-seed -e OMATERM_SETUP_OP_TOKEN=ops_seed -e OMATERM_SETUP_SSH_KEY=ssh-ed25519 SEEDKEY seed --name omaterm2 --label omaterm=1" "new passes setup seed env"
+  pass "new with setup seed args"
+}
+
+test_new_with_op_setup_seed() {
+  new_env
+  write_docker
+  write_op
+
+  run_omaterm new omaterm2 --op "Omaterm Setup"
+
+  assert_file_contains "$TEST_TMP/op-calls" "item get Omaterm Setup --format json" "new reads setup fields from op item"
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it -e OMATERM_SETUP_TS_HOST=op-host -e OMATERM_SETUP_GIT_NAME=Op User -e OMATERM_SETUP_GIT_EMAIL=op@example.com -e OMATERM_SETUP_GH_TOKEN=ghp_op -e OMATERM_SETUP_TS_AUTH_KEY=tskey-op -e OMATERM_SETUP_OP_TOKEN=ops_op -e OMATERM_SETUP_SSH_KEY=ssh-ed25519 OPKEY op --name omaterm2 --label omaterm=1" "new passes op setup fields as seed env"
+  pass "new with op setup seed"
+}
+
+test_new_with_op_url_setup_seed() {
+  new_env
+  write_docker
+  write_op
+
+  run_omaterm new omaterm2 --op "op://Personal/Omaterm Setup"
+
+  assert_file_contains "$TEST_TMP/op-calls" "item get Omaterm Setup --vault Personal --format json" "new resolves op url with one item get"
+  assert_file_not_contains "$TEST_TMP/op-calls" "read" "new does not read op fields one by one"
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it -e OMATERM_SETUP_TS_HOST=op-host -e OMATERM_SETUP_GIT_NAME=Op User" "new passes op url setup fields as seed env"
+  pass "new with op url setup seed"
+}
+
+test_new_cli_seed_args_override_op() {
+  new_env
+  write_docker
+  write_op
+
+  run_omaterm new omaterm2 \
+    --op "Omaterm Setup" \
+    --gh-token ghp_cli \
+    --ts-host cli-host
+
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it -e OMATERM_SETUP_TS_HOST=cli-host -e OMATERM_SETUP_GIT_NAME=Op User -e OMATERM_SETUP_GIT_EMAIL=op@example.com -e OMATERM_SETUP_GH_TOKEN=ghp_cli -e OMATERM_SETUP_TS_AUTH_KEY=tskey-op -e OMATERM_SETUP_OP_TOKEN=ops_op -e OMATERM_SETUP_SSH_KEY=ssh-ed25519 OPKEY op --name omaterm2 --label omaterm=1" "direct seed args override op setup fields"
+  pass "new cli seed args override op"
 }
 
 test_new_mounts_docker_with_d() {
@@ -288,7 +362,10 @@ test_reserve_overrides() {
 
 main() {
   test_default_creates_omaterm
-  test_new_with_setup_token
+  test_new_with_setup_seed_args
+  test_new_with_op_setup_seed
+  test_new_with_op_url_setup_seed
+  test_new_cli_seed_args_override_op
   test_new_mounts_docker_with_d
   test_default_starts_existing
   test_default_attaches_running

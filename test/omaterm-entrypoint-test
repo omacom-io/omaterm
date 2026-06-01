@@ -55,4 +55,10 @@ grep -qF 'exec runuser -u omaterm -- env "${OMATERM_ENV[@]}" bash -l "$@"' "$ENT
 grep -qF 'TERM="${TERM:-xterm-256color}"' "$ENTRYPOINT" ||
   fail "entrypoint should default missing TERM to xterm-256color"
 
+grep -qF 'OMATERM_SETUP_GIT_NAME' "$ENTRYPOINT" ||
+  fail "entrypoint should forward seeded setup env"
+
+grep -qF 'OMATERM_SETUP_TS_HOST' "$ENTRYPOINT" ||
+  fail "entrypoint should forward seeded Tailscale hostname"
+
 pass "entrypoint tailscale and shell handoff contracts"

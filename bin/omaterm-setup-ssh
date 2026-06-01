@@ -1,20 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-OUTPUT_FILE=""
+SETUP_HELPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bin/omaterm-setup-helper
+source "$SETUP_HELPER_DIR/omaterm-setup-helper"
+
 KEY=""
-SETUP_HELPER_MANUAL_PROGRESS=0
 
 usage() {
-  echo "Usage: omaterm-setup-ssh --output FILE [--key PUBLIC_KEY]" >&2
+  echo "Usage: omaterm-setup-ssh [--key PUBLIC_KEY]" >&2
 }
 
 while (($#)); do
   case "$1" in
-    --output)
-      OUTPUT_FILE="${2:-}"
-      shift 2
-      ;;
     --key)
       KEY="${2:-}"
       shift 2
@@ -25,47 +23,6 @@ while (($#)); do
       ;;
   esac
 done
-
-[[ -n $OUTPUT_FILE ]] || {
-  usage
-  exit 2
-}
-
-write_output() {
-  {
-    printf 'SETUP_SSH_KEY=%q\n' "${SETUP_SSH_KEY:-}"
-    printf 'SETUP_HELPER_MANUAL_PROGRESS=%q\n' "$SETUP_HELPER_MANUAL_PROGRESS"
-  } >"$OUTPUT_FILE"
-}
-
-finish_from_interrupt() {
-  write_output
-  exit 130
-}
-
-gum_input_into() {
-  local -n target="$1"
-  local value status
-  shift
-
-  set +e
-  trap : INT
-  value="$(gum input "$@")"
-  status=$?
-  trap - INT
-  set -e
-
-  if (( status != 0 )); then
-    target=""
-    finish_from_interrupt
-  fi
-
-  target="$value"
-  if [[ -n $value ]]; then
-    SETUP_HELPER_MANUAL_PROGRESS=1
-    write_output
-  fi
-}
 
 install_ssh_key() {
   local ssh_key="$1"
@@ -91,13 +48,10 @@ setup_ssh_public_key() {
     gum_input_into ssh_key --placeholder "ssh-ed25519 AAAAC3..." --prompt "SSH key: " || return 1
   fi
   [[ -n $ssh_key ]] || {
-    write_output
     return
   }
 
   install_ssh_key "$ssh_key" || return 1
-  SETUP_SSH_KEY="$ssh_key"
-  write_output
 
   echo "✓ SSH"
   echo

@@ -3,23 +3,8 @@ set -euo pipefail
 
 SETUP_DONE_MARKER="$HOME/.local/state/omaterm/setup-done"
 
-SETUP_JSON=""
-SETUP_GIT_NAME=""
-SETUP_GIT_EMAIL=""
-SETUP_GH_TOKEN=""
-SETUP_TAILSCALE_AUTH_KEY=""
-SETUP_SSH_KEY=""
-SETUP_1PASSWORD_TOKEN=""
-SETUP_1PASSWORD_ADDRESS=""
-SETUP_1PASSWORD_EMAIL=""
-SETUP_1PASSWORD_SECRET_KEY=""
-SETUP_1PASSWORD_SHORTHAND=""
-
 SETUP_UNATTENDED=0
-SETUP_SECTION_FAILED=0
 SETUP_FINISHED=0
-SETUP_IN_PROGRESS=0
-SETUP_FROM_TOKEN=0
 
 if [[ -f $SETUP_DONE_MARKER ]]; then
   exit 0
@@ -40,66 +25,35 @@ banner() {
   echo
 }
 
-json_value() {
-  printf '%s' "$SETUP_JSON" | jq -r "$1"
-}
+setup_unattended() {
+  [[ -n ${OMATERM_SETUP_GIT_NAME:-} ||
+    -n ${OMATERM_SETUP_GIT_EMAIL:-} ||
+    -n ${OMATERM_SETUP_GH_TOKEN:-} ||
+    -n ${OMATERM_SETUP_TS_AUTH_KEY:-} ||
+    -n ${OMATERM_SETUP_TS_HOST:-} ||
+    -n ${OMATERM_SETUP_OP_TOKEN:-} ||
+    -n ${OMATERM_SETUP_SSH_KEY:-} ]] || return 1
 
-decode_setup_token() {
-  local encoded="$1"
+  SETUP_UNATTENDED=1
 
-  encoded="${encoded#OMATERM_SETUP_TOKEN=}"
-  encoded="${encoded#export OMATERM_SETUP_TOKEN=}"
-  encoded="${encoded#\"}"
-  encoded="${encoded%\"}"
-  encoded="${encoded#\'}"
-  encoded="${encoded%\'}"
-  encoded="$(printf '%s' "$encoded" | tr -d '[:space:]')"
-
-  [[ -n $encoded ]] || return 1
-
-  if ! SETUP_JSON="$(printf '%s' "$encoded" | base64 -d 2>/dev/null)"; then
-    echo "Invalid setup token: could not decode base64."
-    return 1
+  if [[ -n ${OMATERM_SETUP_TS_AUTH_KEY:-} && -n ${OMATERM_SETUP_TS_HOST:-} ]]; then
+    omaterm-setup-tailscale --auth-key "$OMATERM_SETUP_TS_AUTH_KEY" || exit 1
   fi
 
-  if ! printf '%s' "$SETUP_JSON" | jq -e type >/dev/null; then
-    echo "Invalid setup token: decoded value is not JSON."
-    return 1
-  fi
-}
-
-apply_setup_token() {
-  local ts_auth_key="$(json_value '.tailscale.auth_key // .tailscale.token // empty')"
-  local git_name="$(json_value '.git.name // empty')"
-  local git_email="$(json_value '.git.email // empty')"
-  local gh_token="$(json_value '.github.token // empty')"
-  local ssh_key="$(json_value '.ssh.public_key // .ssh.key // empty')"
-  local op_token="$(json_value '.onepassword.token // .onepassword.session // empty')"
-  local op_address="$(json_value '.onepassword.account.address // empty')"
-  local op_email="$(json_value '.onepassword.account.email // empty')"
-  local op_secret_key="$(json_value '.onepassword.account.secret_key // empty')"
-  local op_shorthand="$(json_value '.onepassword.account.shorthand // empty')"
-
-  if [[ -n $ts_auth_key ]] && command -v tailscale &>/dev/null; then
-    run_setup_helper omaterm-setup-tailscale --auth-key "$ts_auth_key" || return 1
+  if [[ -n ${OMATERM_SETUP_GIT_NAME:-} && -n ${OMATERM_SETUP_GIT_EMAIL:-} ]]; then
+    omaterm-setup-git --name "$OMATERM_SETUP_GIT_NAME" --email "$OMATERM_SETUP_GIT_EMAIL" || exit 1
   fi
 
-  if [[ -n $git_name && -n $git_email ]]; then
-    run_setup_helper omaterm-setup-git --name "$git_name" --email "$git_email" || return 1
+  if [[ -n ${OMATERM_SETUP_GH_TOKEN:-} ]]; then
+    omaterm-setup-github --token "$OMATERM_SETUP_GH_TOKEN" || exit 1
   fi
 
-  if [[ -n $gh_token ]]; then
-    run_setup_helper omaterm-setup-github --token "$gh_token" || return 1
+  if [[ -n ${OMATERM_SETUP_SSH_KEY:-} ]]; then
+    omaterm-setup-ssh --key "$OMATERM_SETUP_SSH_KEY" || exit 1
   fi
 
-  if [[ -n $ssh_key ]]; then
-    run_setup_helper omaterm-setup-ssh --key "$ssh_key" || return 1
-  fi
-
-  if [[ -n $op_token ]]; then
-    run_setup_helper omaterm-setup-1password --service-token "$op_token" || return 1
-  elif [[ -n $op_address && -n $op_email && -n $op_secret_key ]]; then
-    run_setup_helper omaterm-setup-1password --account "$op_address" "$op_email" "$op_secret_key" "$op_shorthand" || return 1
+  if [[ -n ${OMATERM_SETUP_OP_TOKEN:-} ]]; then
+    omaterm-setup-1password --service-token "$OMATERM_SETUP_OP_TOKEN" || exit 1
   fi
 }
 
@@ -121,61 +75,14 @@ gum_confirm() {
   return "$status"
 }
 
-copy_setup_token() {
-  local setup_json setup_token osc52_token
-
-  setup_json="$(jq -cn \
-    --arg git_name "$SETUP_GIT_NAME" \
-    --arg git_email "$SETUP_GIT_EMAIL" \
-    --arg gh_token "$SETUP_GH_TOKEN" \
-    --arg ts_auth_key "$SETUP_TAILSCALE_AUTH_KEY" \
-    --arg ssh_key "$SETUP_SSH_KEY" \
-    --arg onepassword_token "$SETUP_1PASSWORD_TOKEN" \
-    --arg onepassword_address "$SETUP_1PASSWORD_ADDRESS" \
-    --arg onepassword_email "$SETUP_1PASSWORD_EMAIL" \
-    --arg onepassword_secret_key "$SETUP_1PASSWORD_SECRET_KEY" \
-    --arg onepassword_shorthand "$SETUP_1PASSWORD_SHORTHAND" \
-    '{
-      git: {name: $git_name, email: $git_email},
-      github: {token: $gh_token},
-      tailscale: {auth_key: $ts_auth_key},
-      ssh: {public_key: $ssh_key},
-      onepassword: {
-        token: $onepassword_token,
-        account: {
-          address: $onepassword_address,
-          email: $onepassword_email,
-          secret_key: $onepassword_secret_key,
-          shorthand: $onepassword_shorthand
-        }
-      }
-    }')"
-
-  setup_token="$(printf '%s' "$setup_json" | base64 -w0)"
-  osc52_token="$(printf '%s' "$setup_token" | base64 -w0)"
-  printf '\033]52;c;%s\a' "$osc52_token" >/dev/tty
-
-  echo "✓ Copied setup token to clipboard"
-  echo
-}
-
 run_setup_helper() {
-  local helper="$1" output_file status SETUP_HELPER_MANUAL_PROGRESS=0
+  local helper="$1" status
   shift
 
-  output_file="$(mktemp)"
-
   set +e
-  "$helper" --output "$output_file" "$@"
+  "$helper" "$@"
   status=$?
   set -e
-
-  if [[ -s $output_file ]]; then
-    # shellcheck disable=SC1090
-    source "$output_file"
-  fi
-  (( SETUP_HELPER_MANUAL_PROGRESS )) && SETUP_IN_PROGRESS=1
-  rm -f "$output_file"
 
   if (( status == 130 || status > 1 )); then
     SETUP_FINISHED=1
@@ -226,11 +133,10 @@ run_setup_section() {
   echo
   echo "Skipping $label after an error."
   echo
-  SETUP_SECTION_FAILED=1
   return 0
 }
 
-run_interactive_setup() {
+setup_interactively() {
   run_setup_section "Git identity" setup_git_identity
   run_setup_section "GitHub authentication" setup_gh_authentication
   run_setup_section "Tailscale setup" setup_tailscale
@@ -246,7 +152,6 @@ finish_setup() {
   if (( SETUP_UNATTENDED )); then
     return
   elif [ -t 0 ] && [ -r /dev/tty ]; then
-    (( SETUP_IN_PROGRESS && ! SETUP_FROM_TOKEN )) && copy_setup_token
     gum spin --spinner "globe" --title "Setup complete. Press any key to tmux..." -- bash -c 'read -n 1 -s </dev/tty'
   else
     echo "Setup complete"
@@ -255,16 +160,6 @@ finish_setup() {
 
 banner
 
-if [[ -n ${OMATERM_SETUP_TOKEN:-} ]]; then
-  SETUP_FROM_TOKEN=1
-  if decode_setup_token "$OMATERM_SETUP_TOKEN"; then
-    run_setup_section "Setup token" apply_setup_token
-    if [[ -n ${OMATERM_TS_HOSTNAME:-} ]] && (( ! SETUP_SECTION_FAILED )); then
-      SETUP_UNATTENDED=1
-    fi
-  fi
-else
-  run_interactive_setup
-fi
+setup_unattended || setup_interactively
 
 finish_setup

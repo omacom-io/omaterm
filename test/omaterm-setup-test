@@ -148,38 +148,6 @@ write_gum() {
   chmod +x "$TEST_BIN/gum"
 }
 
-setup_token() {
-  jq -cn \
-    --arg git_name "Token User" \
-    --arg git_email "token@example.com" \
-    --arg gh_token "ghp_token" \
-    --arg ts_auth_key "tskey-token" \
-    --arg ssh_key "ssh-ed25519 TOKENKEY token" \
-    --arg op_token "ops_token" \
-    '{
-      git: {name: $git_name, email: $git_email},
-      github: {token: $gh_token},
-      tailscale: {auth_key: $ts_auth_key},
-      ssh: {public_key: $ssh_key},
-      onepassword: {token: $op_token}
-    }' | base64 -w0
-}
-
-setup_token_without_tailscale() {
-  jq -cn \
-    --arg git_name "Token User" \
-    --arg git_email "token@example.com" \
-    --arg gh_token "ghp_token" \
-    --arg ssh_key "ssh-ed25519 TOKENKEY token" \
-    --arg op_token "ops_token" \
-    '{
-      git: {name: $git_name, email: $git_email},
-      github: {token: $gh_token},
-      ssh: {public_key: $ssh_key},
-      onepassword: {token: $op_token}
-    }' | base64 -w0
-}
-
 run_setup() {
   local status
 
@@ -196,7 +164,7 @@ run_setup() {
   fi
 }
 
-test_env_token_unattended() {
+test_env_seed_unattended() {
   new_env
   write_common_fakes
   write_gum <<'SH'
@@ -205,101 +173,78 @@ printf '%s\n' "$*" >>"$TEST_TMP/gum-calls"
 exit 99
 SH
 
-  OMATERM_SETUP_TOKEN="$(setup_token)" \
-    OMATERM_TS_HOSTNAME="token-host" \
+  OMATERM_SETUP_GIT_NAME="Seed User" \
+    OMATERM_SETUP_GIT_EMAIL="seed@example.com" \
+    OMATERM_SETUP_GH_TOKEN="ghp_seed" \
+    OMATERM_SETUP_TS_AUTH_KEY="tskey-seed" \
+    OMATERM_SETUP_TS_HOST="seed-host" \
+    OMATERM_SETUP_OP_TOKEN="ops_seed" \
+    OMATERM_SETUP_SSH_KEY="ssh-ed25519 SEEDKEY seed" \
     HOME="$TEST_HOME" \
     PATH="$TEST_BIN:$ROOT/bin:$PATH" \
     "$SCRIPT" >"$TEST_TMP/output" 2>&1
 
-  [[ ! -s "$TEST_TMP/gum-calls" ]] || fail "env token should not prompt"
-  assert_file_contains "$TEST_TMP/gitconfig" "name=Token User" "env token configures git name"
-  assert_file_contains "$TEST_TMP/gitconfig" "email=token@example.com" "env token configures git email"
-  assert_file_contains "$TEST_TMP/output" "✓ Git" "env token delegates git setup"
-  assert_equals "ghp_token" "$(cat "$TEST_TMP/gh-token")" "env token logs into gh"
-  assert_file_contains "$TEST_TMP/output" "✓ GitHub" "env token delegates github setup"
-  assert_file_contains "$TEST_TMP/sudo-calls" "-n tailscale up --ssh --accept-routes --hostname=token-host --auth-key=tskey-token" "env token uses non-interactive sudo for tailscale"
-  assert_file_contains "$TEST_TMP/tailscale-calls" "up --ssh --accept-routes --hostname=token-host --auth-key=tskey-token" "env token brings up tailscale with provided hostname"
-  assert_equals "token-host" "$(cat "$TEST_HOME/.local/state/omaterm/tailscale-hostname")" "tailscale hostname stored in user state"
-  assert_equals "ssh-ed25519 TOKENKEY token" "$(cat "$TEST_HOME/.ssh/authorized_keys")" "env token installs ssh key"
-  assert_file_contains "$TEST_TMP/output" "✓ SSH" "env token delegates ssh setup"
-  assert_file_contains "$TEST_TMP/output" "✓ 1Password" "env token applies service token"
-  assert_file_not_contains "$TEST_TMP/output" "Setup complete" "unattended env token skips final wait"
-  pass "env token with OMATERM_TS_HOSTNAME is unattended"
+  [[ ! -s "$TEST_TMP/gum-calls" ]] || fail "env seed should not prompt"
+  assert_file_contains "$TEST_TMP/gitconfig" "name=Seed User" "env seed configures git name"
+  assert_file_contains "$TEST_TMP/gitconfig" "email=seed@example.com" "env seed configures git email"
+  assert_equals "ghp_seed" "$(cat "$TEST_TMP/gh-token")" "env seed logs into gh"
+  assert_file_contains "$TEST_TMP/tailscale-calls" "up --ssh --accept-routes --hostname=seed-host --auth-key=tskey-seed" "env seed brings up tailscale"
+  assert_equals "ssh-ed25519 SEEDKEY seed" "$(cat "$TEST_HOME/.ssh/authorized_keys")" "env seed installs ssh key"
+  assert_file_contains "$TEST_TMP/output" "✓ 1Password" "env seed applies 1password token"
+  assert_file_not_contains "$TEST_TMP/output" "Setup complete" "unattended env seed skips final wait"
+  pass "env seed is unattended"
 }
 
-test_env_token_missing_tailscale_applies_rest() {
+test_env_seed_does_not_prompt_for_missing_tailscale_hostname() {
   new_env
   write_common_fakes
-  rm -f "$TEST_BIN/tailscale"
   write_gum <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$TEST_TMP/gum-calls"
 exit 99
 SH
 
-  OMATERM_SETUP_TOKEN="$(setup_token)" \
-    OMATERM_TS_HOSTNAME="token-host" \
+  OMATERM_SETUP_TS_AUTH_KEY="tskey-seed" \
     HOME="$TEST_HOME" \
     PATH="$TEST_BIN:$ROOT/bin:$PATH" \
     "$SCRIPT" >"$TEST_TMP/output" 2>&1
 
-  [[ ! -s "$TEST_TMP/gum-calls" ]] || fail "missing tailscale env token should not prompt"
-  assert_file_contains "$TEST_TMP/gitconfig" "name=Token User" "missing tailscale env token configures git"
-  assert_equals "ghp_token" "$(cat "$TEST_TMP/gh-token")" "missing tailscale env token logs into gh"
-  assert_equals "ssh-ed25519 TOKENKEY token" "$(cat "$TEST_HOME/.ssh/authorized_keys")" "missing tailscale env token installs ssh key"
-  assert_file_contains "$TEST_TMP/output" "✓ 1Password" "missing tailscale env token still applies 1password token"
-  assert_file_not_contains "$TEST_TMP/output" "Skipping Setup token" "missing tailscale env token does not fail setup token"
-  pass "env token without Tailscale applies rest"
+  [[ ! -s "$TEST_TMP/gum-calls" ]] || fail "env seed without hostname should not prompt"
+  [[ ! -e "$TEST_TMP/tailscale-calls" ]] || ! grep -qF "up --ssh" "$TEST_TMP/tailscale-calls" || fail "env seed without hostname should not run tailscale up"
+  pass "env seed skips partial tailscale data"
 }
 
-test_env_token_interactive_does_not_copy_token() {
+test_env_seed_failure_does_not_fall_back_to_interactive_setup() {
+  local status
+
   new_env
   write_common_fakes
   write_gum <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$TEST_TMP/gum-calls"
-case "${1:-}" in
-  confirm) exit 0 ;;
-  spin) exit 0 ;;
-  *) exit 99 ;;
-esac
+exit 0
 SH
 
-  OMATERM_SETUP_TOKEN="$(setup_token_without_tailscale)" \
-    HOME="$TEST_HOME" \
-    PATH="$TEST_BIN:$ROOT/bin:$PATH" \
-    script -qfec "$SCRIPT" "$TEST_TMP/typescript" >/dev/null 2>&1
-
-  [[ -f "$TEST_HOME/.local/state/omaterm/setup-done" ]] || fail "interactive env token writes setup marker"
-  assert_file_not_contains "$TEST_TMP/gum-calls" "Copy setup token" "interactive env token does not offer to copy a new token"
-  assert_file_not_contains "$TEST_TMP/typescript" $'\033]52;c;' "interactive env token does not copy a new token"
-  pass "interactive env token does not copy setup token"
-}
-
-test_env_token_prompted_hostname_does_not_copy_token() {
-  new_env
-  write_common_fakes
-  write_gum <<'SH'
+  cat >"$TEST_BIN/omaterm-setup-github" <<'SH'
 #!/usr/bin/env bash
-printf '%s\n' "$*" >>"$TEST_TMP/gum-calls"
-case "${1:-}" in
-  input)
-    [[ "$*" == *"Tailnet hostname"* ]] && printf 'token-host\n'
-    ;;
-  spin) exit 0 ;;
-  *) exit 99 ;;
-esac
+printf '%s\n' "$*" >>"$TEST_TMP/setup-github-calls"
+exit 2
 SH
+  chmod +x "$TEST_BIN/omaterm-setup-github"
 
-  OMATERM_SETUP_TOKEN="$(setup_token)" \
+  set +e
+  OMATERM_SETUP_GH_TOKEN="ghp_seed" \
     HOME="$TEST_HOME" \
     PATH="$TEST_BIN:$ROOT/bin:$PATH" \
-    script -qfec "$SCRIPT" "$TEST_TMP/typescript" >/dev/null 2>&1
+    "$SCRIPT" >"$TEST_TMP/output" 2>&1
+  status=$?
+  set -e
 
-  assert_file_contains "$TEST_TMP/gum-calls" "Tailnet hostname" "env token prompts for missing tailscale hostname"
-  assert_file_contains "$TEST_TMP/tailscale-calls" "up --ssh --accept-routes --hostname=token-host --auth-key=tskey-token" "env token uses prompted tailscale hostname"
-  assert_file_not_contains "$TEST_TMP/typescript" $'\033]52;c;' "env token with prompted hostname does not copy setup token"
-  pass "env token with prompted hostname does not copy setup token"
+  [[ "$status" -ne 0 ]] || fail "failing env seed should fail setup"
+  assert_file_contains "$TEST_TMP/setup-github-calls" "--token ghp_seed" "env seed calls seeded helper"
+  [[ ! -s "$TEST_TMP/gum-calls" ]] || fail "failing env seed should not prompt"
+  [[ ! -f "$TEST_HOME/.local/state/omaterm/setup-done" ]] || fail "failing env seed should not write setup marker"
+  pass "env seed failure does not fall back to interactive setup"
 }
 
 test_ctrl_c_skips_setup() {
@@ -320,8 +265,6 @@ SH
 
   [[ -f "$TEST_HOME/.local/state/omaterm/setup-done" ]] || fail "ctrl-c writes setup marker"
   assert_file_not_contains "$TEST_TMP/gum-calls" "Authenticate with GitHub?" "ctrl-c skips later questions"
-  assert_file_not_contains "$TEST_TMP/gum-calls" "Copy setup token" "ctrl-c without manual input does not offer to copy a new token"
-  assert_file_not_contains "$TEST_TMP/output" "Paste Omaterm setup token" "ctrl-c does not prompt for setup token"
   assert_file_contains "$TEST_TMP/output" "Setup complete" "ctrl-c finishes setup"
   pass "ctrl-c skips setup"
 }
@@ -370,7 +313,6 @@ SH
 
   [[ -f "$TEST_HOME/.local/state/omaterm/setup-done" ]] || fail "ctrl-c after manual progress writes setup marker"
   assert_file_not_contains "$TEST_TMP/gum-calls" "Authenticate with GitHub?" "ctrl-c after manual progress skips later questions"
-  assert_file_not_contains "$TEST_TMP/output" "Paste Omaterm setup token" "ctrl-c after manual progress does not prompt for setup token"
   pass "ctrl-c after manual progress finishes setup"
 }
 
@@ -400,7 +342,6 @@ SH
   run_setup
 
   [[ -f "$TEST_HOME/.local/state/omaterm/setup-done" ]] || fail "ctrl-c after tailscale hostname writes setup marker"
-  assert_file_not_contains "$TEST_TMP/output" "Paste Omaterm setup token" "ctrl-c after tailscale hostname does not prompt for setup token"
   assert_file_contains "$TEST_TMP/output" "Setup complete" "ctrl-c after tailscale hostname finishes setup"
   pass "ctrl-c after tailscale hostname finishes setup"
 }
@@ -467,26 +408,6 @@ SH
   assert_equals "manual-host" "$(cat "$TEST_HOME/.local/state/omaterm/tailscale-hostname")" "manual tailscale hostname stored in user state"
   assert_file_not_contains "$TEST_TMP/sudo-calls" "tee" "tailscale hostname storage does not use sudo"
   pass "manual tailscale requires auth key and stores hostname without sudo"
-}
-
-test_tailscale_missing_skips_prompt() {
-  new_env
-  write_common_fakes
-  rm -f "$TEST_BIN/tailscale"
-  write_gum <<'SH'
-#!/usr/bin/env bash
-printf '%s\n' "$*" >>"$TEST_TMP/gum-calls"
-case "$1" in
-  confirm) exit 1 ;;
-  spin) exit 0 ;;
-  *) exit 0 ;;
-esac
-SH
-
-  run_setup
-
-  assert_file_not_contains "$TEST_TMP/gum-calls" "Connect to Tailscale?" "missing tailscale skips tailscale prompt"
-  pass "missing Tailscale skips prompt"
 }
 
 test_github_manual_uses_helper() {
@@ -569,7 +490,7 @@ SH
   pass "1Password service token path"
 }
 
-test_1password_full_account_token_excludes_password() {
+test_1password_full_account_path() {
   new_env
   write_common_fakes
   write_gum <<'SH'
@@ -577,11 +498,7 @@ test_1password_full_account_token_excludes_password() {
 printf '%s\n' "$*" >>"$TEST_TMP/gum-calls"
 case "$1" in
   confirm)
-    if [[ "$*" == "confirm Authenticate with 1Password?" ]]; then
-      exit 0
-    elif [[ "$*" == "confirm Copy setup token to clipboard? --default=false" ]]; then
-      exit 0
-    fi
+    [[ "$*" == "confirm Authenticate with 1Password?" ]] && exit 0
     exit 1
     ;;
   choose) printf 'Use full account details\n' ;;
@@ -604,40 +521,24 @@ SH
 
   assert_file_contains "$TEST_TMP/op-calls" "account add --address my.1password.com --email me@example.com --secret-key A3-SECRET --signin --shorthand my" "full account path adds account with details"
   assert_equals "super-secret-password" "$(cat "$TEST_TMP/op-password")" "full account password is piped to op"
-  osc52_token="$(perl -0ne 'print "$1\n" if /\e\]52;c;([A-Za-z0-9+\/=]+)\a/s' "$TEST_TMP/typescript" | tail -n1)"
-  [[ -n $osc52_token ]] || fail "setup token is copied with OSC 52"
-  token="$(printf '%s' "$osc52_token" | base64 -d)"
-  decoded="$(printf '%s' "$token" | base64 -d)"
-  printf '%s' "$decoded" | jq -e '.onepassword.account.address == "my.1password.com" and .onepassword.account.email == "me@example.com" and .onepassword.account.secret_key == "A3-SECRET" and .onepassword.account.shorthand == "my"' >/dev/null || fail "full account details are included in setup token"
-  ! printf '%s' "$decoded" | grep -q 'super-secret-password' || fail "full account password must not be included in setup token"
-  pass "1Password full account token excludes password"
-}
-
-test_setup_token_copy_has_osc52_fallback() {
-  grep -qF 'printf '\''\033]52;c;%s\a'\''' "$SCRIPT" ||
-    fail "setup token copy should use OSC 52"
-  ! grep -qE 'wl-copy|xclip|xsel' "$SCRIPT" ||
-    fail "setup token copy should not use local clipboard commands"
-  pass "setup token copy uses OSC 52"
+  assert_file_not_contains "$TEST_TMP/typescript" $'\033]52;c;' "full account path does not copy setup data"
+  pass "1Password full account path"
 }
 
 main() {
-  test_env_token_unattended
-  test_env_token_missing_tailscale_applies_rest
-  test_env_token_interactive_does_not_copy_token
-  test_env_token_prompted_hostname_does_not_copy_token
+  test_env_seed_unattended
+  test_env_seed_does_not_prompt_for_missing_tailscale_hostname
+  test_env_seed_failure_does_not_fall_back_to_interactive_setup
   test_ctrl_c_skips_setup
   test_confirm_interrupt_status_skips_setup
   test_ctrl_c_after_manual_progress_finishes_setup
   test_ctrl_c_after_tailscale_hostname_finishes_setup
   test_git_manual_uses_helper
   test_tailscale_manual_requires_auth_key_and_no_sudo_for_hostname
-  test_tailscale_missing_skips_prompt
   test_github_manual_uses_helper
   test_ssh_key_only_writes_authorized_keys
   test_1password_service_token_path
-  test_1password_full_account_token_excludes_password
-  test_setup_token_copy_has_osc52_fallback
+  test_1password_full_account_path
 }
 
 main "$@"

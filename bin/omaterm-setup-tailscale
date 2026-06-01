@@ -1,21 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SETUP_HELPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bin/omaterm-setup-helper
+source "$SETUP_HELPER_DIR/omaterm-setup-helper"
+
 TAILSCALE_HOSTNAME_FILE="$HOME/.local/state/omaterm/tailscale-hostname"
-OUTPUT_FILE=""
 AUTH_KEY=""
-SETUP_HELPER_MANUAL_PROGRESS=0
 
 usage() {
-  echo "Usage: omaterm-setup-tailscale --output FILE [--auth-key AUTH_KEY]" >&2
+  echo "Usage: omaterm-setup-tailscale [--auth-key AUTH_KEY]" >&2
 }
 
 while (($#)); do
   case "$1" in
-    --output)
-      OUTPUT_FILE="${2:-}"
-      shift 2
-      ;;
     --auth-key)
       AUTH_KEY="${2:-}"
       shift 2
@@ -27,43 +25,6 @@ while (($#)); do
   esac
 done
 
-[[ -n $OUTPUT_FILE ]] || {
-  usage
-  exit 2
-}
-
-write_output() {
-  {
-    printf 'SETUP_TAILSCALE_AUTH_KEY=%q\n' "${SETUP_TAILSCALE_AUTH_KEY:-}"
-    printf 'SETUP_HELPER_MANUAL_PROGRESS=%q\n' "$SETUP_HELPER_MANUAL_PROGRESS"
-  } >"$OUTPUT_FILE"
-}
-
-gum_input_into() {
-  local -n target="$1"
-  local value status
-  shift
-
-  set +e
-  trap : INT
-  value="$(gum input "$@")"
-  status=$?
-  trap - INT
-  set -e
-
-  if (( status != 0 )); then
-    target=""
-    write_output
-    exit 130
-  fi
-
-  target="$value"
-  if [[ -n $value ]]; then
-    SETUP_HELPER_MANUAL_PROGRESS=1
-    write_output
-  fi
-}
-
 tailscale_up() {
   sudo -n tailscale up "$@" || return 1
 }
@@ -72,15 +33,15 @@ prompt_hostname() {
   local -n target="$1"
   local current_name entered_hostname
 
-  if [[ -n ${OMATERM_TS_HOSTNAME:-} ]]; then
-    if [[ $OMATERM_TS_HOSTNAME =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$ ]]; then
+  if [[ -n ${OMATERM_SETUP_TS_HOST:-} ]]; then
+    if [[ $OMATERM_SETUP_TS_HOST =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$ ]]; then
       mkdir -p "$(dirname "$TAILSCALE_HOSTNAME_FILE")" || return 1
-      printf "%s\n" "$OMATERM_TS_HOSTNAME" >"$TAILSCALE_HOSTNAME_FILE" || return 1
-      target="$OMATERM_TS_HOSTNAME"
+      printf "%s\n" "$OMATERM_SETUP_TS_HOST" >"$TAILSCALE_HOSTNAME_FILE" || return 1
+      target="$OMATERM_SETUP_TS_HOST"
       return
     fi
 
-    echo "Invalid OMATERM_TS_HOSTNAME. Use letters, numbers, and hyphens only, starting with a letter or number." >&2
+    echo "Invalid OMATERM_SETUP_TS_HOST. Use letters, numbers, and hyphens only, starting with a letter or number." >&2
     return 1
   fi
 
@@ -107,8 +68,6 @@ setup_tailscale() {
   local tailnet_hostname="" tailscale_auth_key="$AUTH_KEY"
 
   if tailscale status &>/dev/null; then
-    SETUP_TAILSCALE_AUTH_KEY="$tailscale_auth_key"
-    write_output
     return 0
   fi
 
@@ -126,9 +85,6 @@ setup_tailscale() {
   echo
   echo "Bringing up Tailscale..."
   tailscale_up --ssh --accept-routes --hostname="$tailnet_hostname" --auth-key="$tailscale_auth_key" || return 1
-
-  SETUP_TAILSCALE_AUTH_KEY="$tailscale_auth_key"
-  write_output
 
   echo "✓ Tailscale"
   echo

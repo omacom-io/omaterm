@@ -16,8 +16,6 @@ tailscaled_running() {
 }
 
 start_tailscaled() {
-  command -v tailscaled &>/dev/null || return 0
-
   mkdir -p "$(dirname "$TAILSCALE_SOCKET")" "$(dirname "$TAILSCALE_STATE")"
 
   local tun_args=(--tun=userspace-networking)
@@ -73,12 +71,18 @@ OMATERM_ENV=(
 )
 
 SETUP_ENV=("${OMATERM_ENV[@]}")
-if [ -n "${OMATERM_SETUP_TOKEN:-}" ]; then
-  SETUP_ENV+=(OMATERM_SETUP_TOKEN="$OMATERM_SETUP_TOKEN")
-fi
-if [ -n "${OMATERM_TS_HOSTNAME:-}" ]; then
-  SETUP_ENV+=(OMATERM_TS_HOSTNAME="$OMATERM_TS_HOSTNAME")
-fi
+for env_name in \
+  OMATERM_SETUP_TS_HOST \
+  OMATERM_SETUP_GIT_NAME \
+  OMATERM_SETUP_GIT_EMAIL \
+  OMATERM_SETUP_GH_TOKEN \
+  OMATERM_SETUP_TS_AUTH_KEY \
+  OMATERM_SETUP_OP_TOKEN \
+  OMATERM_SETUP_SSH_KEY; do
+  if [ -n "${!env_name:-}" ]; then
+    SETUP_ENV+=("$env_name=${!env_name}")
+  fi
+done
 
 runuser -u omaterm -- env "${SETUP_ENV[@]}" /home/omaterm/.local/bin/omaterm-setup
 

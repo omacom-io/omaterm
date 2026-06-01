@@ -19,22 +19,51 @@ usage() {
   cat >&2 <<'EOF'
 Usage:
   omaterm
-  omaterm new NAME [-d] [-t SETUP-TOKEN] [-h TAILSCALE-HOSTNAME]
+  omaterm new NAME [-d]
+    [--op ITEM]
+    [--git-name NAME] [--git-email EMAIL] [--gh-token TOKEN]
+    [--ts-token TOKEN] [--ts-host HOSTNAME] [--op-token TOKEN]
+    [--ssh-key PUBLIC_KEY]
   omaterm ls
   omaterm rm [-a|NAME]
 EOF
 }
 
 docker_env_args() {
-  local setup_token="${1:-${OMATERM_SETUP_TOKEN:-}}"
-  local tailscale_hostname="${2:-${OMATERM_TS_HOSTNAME:-}}"
+  local tailscale_host="${1:-}"
+  local git_name="${2:-}"
+  local git_email="${3:-}"
+  local gh_token="${4:-}"
+  local ts_token="${5:-}"
+  local op_token="${6:-}"
+  local ssh_key="${7:-}"
 
-  if [[ -n $setup_token ]]; then
-    printf '%s\0%s\0' -e "OMATERM_SETUP_TOKEN=$setup_token"
+  if [[ -n $tailscale_host ]]; then
+    printf '%s\0%s\0' -e "OMATERM_SETUP_TS_HOST=$tailscale_host"
   fi
 
-  if [[ -n $tailscale_hostname ]]; then
-    printf '%s\0%s\0' -e "OMATERM_TS_HOSTNAME=$tailscale_hostname"
+  if [[ -n $git_name ]]; then
+    printf '%s\0%s\0' -e "OMATERM_SETUP_GIT_NAME=$git_name"
+  fi
+
+  if [[ -n $git_email ]]; then
+    printf '%s\0%s\0' -e "OMATERM_SETUP_GIT_EMAIL=$git_email"
+  fi
+
+  if [[ -n $gh_token ]]; then
+    printf '%s\0%s\0' -e "OMATERM_SETUP_GH_TOKEN=$gh_token"
+  fi
+
+  if [[ -n $ts_token ]]; then
+    printf '%s\0%s\0' -e "OMATERM_SETUP_TS_AUTH_KEY=$ts_token"
+  fi
+
+  if [[ -n $op_token ]]; then
+    printf '%s\0%s\0' -e "OMATERM_SETUP_OP_TOKEN=$op_token"
+  fi
+
+  if [[ -n $ssh_key ]]; then
+    printf '%s\0%s\0' -e "OMATERM_SETUP_SSH_KEY=$ssh_key"
   fi
 }
 
@@ -179,27 +208,151 @@ choose_omaterm() {
   return 1
 }
 
+require_command() {
+  local command_name="$1"
+
+  if ! command -v "$command_name" >/dev/null 2>&1; then
+    echo "Error: --op requires '$command_name' on the host." >&2
+    exit 1
+  fi
+}
+
+op_item_field() {
+  local item_json="$1" field="$2"
+
+  printf '%s' "$item_json" |
+    jq -r --arg field "$field" '
+      (.fields // []) |
+      (
+        map(select((.section? == null) and (.label == $field or .id == $field))) +
+        map(select(.label == $field or .id == $field))
+      ) |
+      .[0].value // empty
+    '
+}
+
+op_item_json() {
+  local op_ref="$1" path vault item extra
+
+  if [[ $op_ref == op://* ]]; then
+    path="${op_ref#op://}"
+    IFS=/ read -r vault item extra <<<"$path"
+
+    if [[ -z $vault || -z $item || -n $extra ]]; then
+      echo "Error: --op expects an item reference like op://VAULT/ITEM, not a field reference." >&2
+      return 1
+    fi
+
+    op item get "$item" --vault "$vault" --format json
+  else
+    op item get "$op_ref" --format json
+  fi
+}
+
+load_setup_from_op() {
+  local op_ref="$1" item_json value loaded=0
+
+  require_command op
+  require_command jq
+
+  item_json="$(op_item_json "$op_ref")" || {
+    echo "Error: could not read 1Password item: $op_ref" >&2
+    exit 1
+  }
+
+  value="$(op_item_field "$item_json" "git-name")"
+  if [[ -n $value && -z $git_name ]]; then git_name="$value"; loaded=1; fi
+  value="$(op_item_field "$item_json" "git-email")"
+  if [[ -n $value && -z $git_email ]]; then git_email="$value"; loaded=1; fi
+  value="$(op_item_field "$item_json" "gh-token")"
+  if [[ -n $value && -z $gh_token ]]; then gh_token="$value"; loaded=1; fi
+  value="$(op_item_field "$item_json" "ts-token")"
+  if [[ -n $value && -z $ts_token ]]; then ts_token="$value"; loaded=1; fi
+  value="$(op_item_field "$item_json" "ts-host")"
+  if [[ -n $value && -z $tailscale_host ]]; then tailscale_host="$value"; loaded=1; fi
+  value="$(op_item_field "$item_json" "op-token")"
+  if [[ -n $value && -z $op_token ]]; then op_token="$value"; loaded=1; fi
+  value="$(op_item_field "$item_json" "ssh-key")"
+  if [[ -n $value && -z $ssh_key ]]; then ssh_key="$value"; loaded=1; fi
+
+  if (( ! loaded )); then
+    echo "Error: 1Password item has no recognized Omaterm setup fields." >&2
+    echo "Expected top-level fields: git-name, git-email, gh-token, ts-token, ts-host, op-token, ssh-key." >&2
+    exit 1
+  fi
+}
+
 run_new() {
-  local name="$1" setup_token="" tailscale_hostname="" mount_docker=0
+  local name="$1" tailscale_host="" mount_docker=0
+  local setup_op=""
+  local git_name="" git_email="" gh_token="" ts_token="" op_token="" ssh_key=""
   local docker_args=() env_args=() existing
   shift
 
   while (($#)); do
     case "$1" in
-      -t)
+      --op)
         [[ -n ${2:-} ]] || {
           usage
           exit 2
         }
-        setup_token="${2:-}"
+        setup_op="${2:-}"
         shift 2
         ;;
-      -h)
+      --ts-host)
         [[ -n ${2:-} ]] || {
           usage
           exit 2
         }
-        tailscale_hostname="${2:-}"
+        tailscale_host="${2:-}"
+        shift 2
+        ;;
+      --git-name)
+        [[ -n ${2:-} ]] || {
+          usage
+          exit 2
+        }
+        git_name="${2:-}"
+        shift 2
+        ;;
+      --git-email)
+        [[ -n ${2:-} ]] || {
+          usage
+          exit 2
+        }
+        git_email="${2:-}"
+        shift 2
+        ;;
+      --gh-token)
+        [[ -n ${2:-} ]] || {
+          usage
+          exit 2
+        }
+        gh_token="${2:-}"
+        shift 2
+        ;;
+      --ts-token)
+        [[ -n ${2:-} ]] || {
+          usage
+          exit 2
+        }
+        ts_token="${2:-}"
+        shift 2
+        ;;
+      --op-token)
+        [[ -n ${2:-} ]] || {
+          usage
+          exit 2
+        }
+        op_token="${2:-}"
+        shift 2
+        ;;
+      --ssh-key)
+        [[ -n ${2:-} ]] || {
+          usage
+          exit 2
+        }
+        ssh_key="${2:-}"
         shift 2
         ;;
       -d)
@@ -212,6 +365,10 @@ run_new() {
         ;;
     esac
   done
+
+  if [[ -n $setup_op ]]; then
+    load_setup_from_op "$setup_op"
+  fi
 
   validate_name "$name"
 
@@ -232,7 +389,7 @@ run_new() {
 
   while IFS= read -r -d '' arg; do
     env_args+=("$arg")
-  done < <(docker_env_args "$setup_token" "$tailscale_hostname")
+  done < <(docker_env_args "$tailscale_host" "$git_name" "$git_email" "$gh_token" "$ts_token" "$op_token" "$ssh_key")
 
   if (( mount_docker )); then
     docker_args+=(-v /var/run/docker.sock:/var/run/docker.sock)

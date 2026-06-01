@@ -25,29 +25,32 @@ On Arch, Debian/Ubuntu, and Fedora, it also installs and enables Docker. On WSL,
 
 You'll be dropped straight into the Docker setup. You can always return to your Omaterm by calling `omaterm` from the terminal.
 
-## Setup token
+## Setup
 
-At the end of first-run setup, Omaterm can copy a base64-encoded JSON setup token to your clipboard. Reuse it on another Omaterm with:
+If no setup argument is present, Omaterm starts the normal interactive questions. Press Ctrl+C at a setup prompt to skip the rest of setup.
 
-```bash
-OMATERM_SETUP_TOKEN=... omaterm
-```
-
-Or create a second named Omaterm with:
+Seed first-run setup directly when creating a named Omaterm:
 
 ```bash
-omaterm new omaterm2 -t ...
+omaterm new omaterm2 \
+  --git-name "Your Name" \
+  --git-email you@example.com \
+  --gh-token ghp_... \
+  --ts-token tskey-auth-... \
+  --ts-host my-omaterm \
+  --op-token ops_... \
+  --ssh-key "ssh-ed25519 AAAAC3..."
 ```
 
-To skip the Tailscale hostname prompt too, pass a unique hostname for the new machine:
+When any setup argument is present, setup applies the provided values and finishes without interactive prompts.
+Instead of passing every value on the command line, store them as top-level fields on a 1Password item and point Omaterm at that item:
 
 ```bash
-OMATERM_SETUP_TOKEN=... OMATERM_TS_HOSTNAME=my-omaterm omaterm
-omaterm new omaterm2 -t ... -h my-omaterm
+omaterm new omaterm2 --op "Omaterm Setup"
 ```
 
-If no environment variable is present, setup starts the normal interactive questions. Press Ctrl+C at a setup prompt to skip the rest of setup.
-The token is applied when the container is first created; an existing `omaterm` container keeps its original environment.
+Omaterm reads fields named `git-name`, `git-email`, `gh-token`, `ts-token`, `ts-host`, `op-token`, and `ssh-key`. Direct command-line values override fields from the 1Password item.
+Setup values are applied only when the container is first created; an existing `omaterm` container keeps its original environment and home directory state.
 
 ## Run manually
 
@@ -85,4 +88,4 @@ OMATERM_CPU_SHARES=512 omaterm new ci         # give this layout a different wei
 OMATERM_NO_LIMITS=1 omaterm new ci            # opt out of limits entirely
 ```
 
-CPU and memory limits set this way can also be adjusted on a running Omaterm with `docker update`; environment variables baked into a container (such as the setup token) cannot.
+CPU and memory limits set this way can also be adjusted on a running Omaterm with `docker update`; environment variables baked into a container cannot.
