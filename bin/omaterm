@@ -502,7 +502,25 @@ run_connect() {
 }
 
 run_ls() {
-  omaterm_names
+  local names name state mem_bytes mem
+  mapfile -t names < <(omaterm_names)
+  ((${#names[@]})) || return 0
+
+  {
+    printf 'NAME\tSTATUS\tMEMORY\tPREPARE\n'
+    for name in "${names[@]}"; do
+      state="$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || echo '?')"
+
+      mem_bytes="$(docker inspect -f '{{.HostConfig.Memory}}' "$name" 2>/dev/null || echo 0)"
+      if [[ $mem_bytes =~ ^[0-9]+$ ]] && ((mem_bytes > 0)); then
+        mem="$((mem_bytes / 1024 / 1024))m"
+      else
+        mem="unlimited"
+      fi
+
+      printf '%s\t%s\t%s\t%s\n' "$name" "$state" "$mem" "$(prepare_status "$name" "$state")"
+    done
+  } | column -t -s "$(printf '\t')"
 }
 
 run_exec() {
