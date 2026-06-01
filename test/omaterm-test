@@ -151,8 +151,8 @@ test_help_lists_commands() {
 
   run_omaterm -h
 
-  assert_file_contains "$TEST_TMP/output" "omaterm new NAME [-d] [-e|--ephemeral]" "help lists named new"
-  assert_file_contains "$TEST_TMP/output" "omaterm new [-d] -e|--ephemeral" "help lists unnamed ephemeral new"
+  assert_file_contains "$TEST_TMP/output" "omaterm new NAME [-d] [-e|--ephemeral] [-- COMMAND...]" "help lists named new"
+  assert_file_contains "$TEST_TMP/output" "omaterm new [-d] -e|--ephemeral [-- COMMAND...]" "help lists unnamed ephemeral new"
   assert_file_contains "$TEST_TMP/output" "omaterm connect [NAME]" "help lists connect"
   assert_file_contains "$TEST_TMP/output" "omaterm exec NAME [-w|--workdir DIR] COMMAND..." "help lists exec workdir"
   pass "help lists commands"
@@ -285,6 +285,26 @@ test_new_ephemeral_rebalances_after_exit() {
   assert_file_contains "$TEST_TMP/docker-actions" "run -it --name hand --label omaterm=1 --net host --cpuset-cpus 1-19 --cpu-shares 1024 --memory 21162m --memory-swap 21162m --rm omaterm:test" "ephemeral new claims its temporary share"
   assert_file_contains "$TEST_TMP/docker-actions" "update --cpuset-cpus 1-19 --cpu-shares 1024 --memory 31744m --memory-swap 31744m omaterm2" "ephemeral new rebalances survivors after exit"
   pass "new ephemeral rebalances after exit"
+}
+
+test_new_runs_command_after_setup() {
+  new_env
+  write_docker
+
+  run_omaterm new hand -- bash -lc 'echo boot'
+
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name hand --label omaterm=1 --net host $LIMITS_ONE omaterm:test bash -lc echo boot" "new passes command after image"
+  pass "new runs command after setup"
+}
+
+test_new_ephemeral_without_name_runs_command() {
+  new_env
+  write_docker
+
+  run_omaterm new -d -e -- bash -lc 'setup --reset'
+
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it --label omaterm=1 --net host $LIMITS_ONE --rm -v /var/run/docker.sock:/var/run/docker.sock omaterm:test bash -lc setup --reset" "ephemeral new without name passes command after image"
+  pass "new ephemeral without name runs command"
 }
 
 test_default_starts_existing() {
@@ -516,6 +536,8 @@ main() {
   test_new_ephemeral_name_is_optional
   test_new_ephemeral_without_name_mounts_docker_with_d
   test_new_ephemeral_rebalances_after_exit
+  test_new_runs_command_after_setup
+  test_new_ephemeral_without_name_runs_command
   test_default_starts_existing
   test_default_attaches_running
   test_connect_named_starts_existing

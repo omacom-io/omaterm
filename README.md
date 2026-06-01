@@ -61,6 +61,7 @@ omaterm connect omaterm2
 omaterm new omaterm2
 omaterm new omaterm2 -d # Mount the host Docker engine
 omaterm new -d -e # Remove the Omaterm when it exits
+omaterm new -d -e -- bash -lc 'mkdir -p Work/basecamp && cd Work/basecamp && gh repo clone basecamp/bc3 && cd bc3 && setup --reset && exec bash -l'
 omaterm exec omaterm2 -w /home/omaterm/Work/project 'docker ps'
 omaterm ls
 omaterm rm omaterm2
