@@ -29,44 +29,6 @@ Usage:
 EOF
 }
 
-docker_env_args() {
-  local tailscale_host="${1:-}"
-  local git_name="${2:-}"
-  local git_email="${3:-}"
-  local gh_token="${4:-}"
-  local ts_token="${5:-}"
-  local op_token="${6:-}"
-  local ssh_key="${7:-}"
-
-  if [[ -n $tailscale_host ]]; then
-    printf '%s\0%s\0' -e "OMATERM_SETUP_TS_HOST=$tailscale_host"
-  fi
-
-  if [[ -n $git_name ]]; then
-    printf '%s\0%s\0' -e "OMATERM_SETUP_GIT_NAME=$git_name"
-  fi
-
-  if [[ -n $git_email ]]; then
-    printf '%s\0%s\0' -e "OMATERM_SETUP_GIT_EMAIL=$git_email"
-  fi
-
-  if [[ -n $gh_token ]]; then
-    printf '%s\0%s\0' -e "OMATERM_SETUP_GH_TOKEN=$gh_token"
-  fi
-
-  if [[ -n $ts_token ]]; then
-    printf '%s\0%s\0' -e "OMATERM_SETUP_TS_AUTH_KEY=$ts_token"
-  fi
-
-  if [[ -n $op_token ]]; then
-    printf '%s\0%s\0' -e "OMATERM_SETUP_OP_TOKEN=$op_token"
-  fi
-
-  if [[ -n $ssh_key ]]; then
-    printf '%s\0%s\0' -e "OMATERM_SETUP_SSH_KEY=$ssh_key"
-  fi
-}
-
 validate_name() {
   local name="$1"
 
@@ -387,9 +349,13 @@ run_new() {
     exec </dev/tty
   fi
 
-  while IFS= read -r -d '' arg; do
-    env_args+=("$arg")
-  done < <(docker_env_args "$tailscale_host" "$git_name" "$git_email" "$gh_token" "$ts_token" "$op_token" "$ssh_key")
+  [[ -n $tailscale_host ]] && env_args+=(-e "OMATERM_SETUP_TS_HOST=$tailscale_host")
+  [[ -n $git_name ]] && env_args+=(-e "OMATERM_SETUP_GIT_NAME=$git_name")
+  [[ -n $git_email ]] && env_args+=(-e "OMATERM_SETUP_GIT_EMAIL=$git_email")
+  [[ -n $gh_token ]] && env_args+=(-e "OMATERM_SETUP_GH_TOKEN=$gh_token")
+  [[ -n $ts_token ]] && env_args+=(-e "OMATERM_SETUP_TS_AUTH_KEY=$ts_token")
+  [[ -n $op_token ]] && env_args+=(-e "OMATERM_SETUP_OP_TOKEN=$op_token")
+  [[ -n $ssh_key ]] && env_args+=(-e "OMATERM_SETUP_SSH_KEY=$ssh_key")
 
   if (( mount_docker )); then
     docker_args+=(-v /var/run/docker.sock:/var/run/docker.sock)

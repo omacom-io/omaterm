@@ -46,12 +46,8 @@ setup_git_identity() {
   git config --global user.name "$git_name" || return 1
   git config --global user.email "$git_email" || return 1
 
-  if [[ -n $NAME || -n $EMAIL ]]; then
-    echo "✓ Git"
-  else
-    echo "✓ Git"
-    echo
-  fi
+  echo "✓ Git"
+  [[ -n $NAME || -n $EMAIL ]] || echo
 }
 
 setup_git_identity
