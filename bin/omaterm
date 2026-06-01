@@ -4,6 +4,7 @@ set -euo pipefail
 IMAGE="${OMATERM_IMAGE:-ghcr.io/omacom-io/omaterm}"
 DEFAULT_NAME="omaterm"
 LABEL="omaterm=1"
+PREPARE_LABEL="omaterm.prepare=1"
 PREPARE_DONE_MARKER="/home/omaterm/.local/state/omaterm/prepare-done"
 
 # Resource limits. The host keeps a reserved slice for itself; the rest is
@@ -52,6 +53,16 @@ container_exists() {
 
 container_running() {
   [[ "$(docker inspect -f '{{.State.Running}}' "$1")" == "true" ]]
+}
+
+container_prepared() {
+  local name="$1" prepared cmd
+
+  prepared="$(docker inspect -f '{{ index .Config.Labels "omaterm.prepare" }}' "$name" 2>/dev/null || true)"
+  [[ $prepared == "1" ]] && return 0
+
+  cmd="$(docker inspect -f '{{ json .Config.Cmd }}' "$name" 2>/dev/null || true)"
+  [[ $cmd == *"$PREPARE_DONE_MARKER"* ]]
 }
 
 host_core_count() {
@@ -439,6 +450,7 @@ run_new() {
     docker run -d "${env_args[@]}" \
       "${name_args[@]}" \
       --label "$LABEL" \
+      --label "$PREPARE_LABEL" \
       --net host \
       "${LIMIT_ARGS[@]}" \
       "${docker_args[@]}" \
@@ -467,7 +479,14 @@ connect_omaterm() {
   local name="$1"
 
   if container_running "$name"; then
-    exec docker attach "$name"
+    if container_prepared "$name"; then
+      exec docker exec -it "$name" bash -l
+    else
+      exec docker attach "$name"
+    fi
+  elif container_prepared "$name"; then
+    docker start "$name" >/dev/null
+    exec docker exec -it "$name" bash -l
   else
     exec docker start -ai "$name"
   fi
