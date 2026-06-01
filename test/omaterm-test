@@ -145,6 +145,17 @@ run_omaterm() {
 # Omaterm is pinned to cores 1-19 and capped at (65536 - 2048) MB.
 LIMITS_ONE="--cpuset-cpus 1-19 --cpu-shares 1024 --memory 63488m --memory-swap 63488m"
 
+test_help_lists_commands() {
+  new_env
+  write_docker
+
+  run_omaterm -h
+
+  assert_file_contains "$TEST_TMP/output" "omaterm connect [NAME]" "help lists connect"
+  assert_file_contains "$TEST_TMP/output" "omaterm exec NAME [-w|--workdir DIR] COMMAND..." "help lists exec workdir"
+  pass "help lists commands"
+}
+
 test_default_creates_omaterm() {
   new_env
   write_docker
@@ -243,6 +254,39 @@ test_default_attaches_running() {
   pass "default attaches running"
 }
 
+test_connect_named_starts_existing() {
+  new_env
+  write_docker
+  printf 'basecamp:false:1\n' >"$TEST_CONTAINERS"
+
+  run_omaterm connect basecamp
+
+  assert_file_contains "$TEST_TMP/docker-actions" "start -ai basecamp" "connect starts named omaterm"
+  pass "connect named starts existing"
+}
+
+test_connect_named_attaches_running() {
+  new_env
+  write_docker
+  printf 'basecamp:true:1\n' >"$TEST_CONTAINERS"
+
+  run_omaterm connect basecamp
+
+  assert_file_contains "$TEST_TMP/docker-actions" "attach basecamp" "connect attaches named omaterm"
+  pass "connect named attaches running"
+}
+
+test_connect_without_name_starts_existing() {
+  new_env
+  write_docker
+  printf 'omaterm:false:1\n' >"$TEST_CONTAINERS"
+
+  run_omaterm connect
+
+  assert_file_contains "$TEST_TMP/docker-actions" "start -ai omaterm" "connect without name starts selected omaterm"
+  pass "connect without name starts existing"
+}
+
 test_multiple_uses_gum_choice() {
   new_env
   write_docker
@@ -270,6 +314,51 @@ test_ls_lists_omaterms() {
     fail "ls should only include labeled omaterms"
   fi
   pass "ls lists omaterms"
+}
+
+test_exec_runs_command() {
+  new_env
+  write_docker
+  printf 'omaterm:true:1\n' >"$TEST_CONTAINERS"
+
+  run_omaterm exec omaterm 'echo hi && pwd'
+
+  assert_file_contains "$TEST_TMP/docker-actions" "exec omaterm bash -lc echo hi && pwd" "exec runs command through bash"
+  pass "exec runs command"
+}
+
+test_exec_starts_stopped_container() {
+  new_env
+  write_docker
+  printf 'omaterm:false:1\n' >"$TEST_CONTAINERS"
+
+  run_omaterm exec omaterm pwd
+
+  assert_file_contains "$TEST_TMP/docker-actions" "start omaterm" "exec starts stopped omaterm"
+  assert_file_contains "$TEST_TMP/docker-actions" "exec omaterm bash -lc pwd" "exec runs command after start"
+  pass "exec starts stopped container"
+}
+
+test_exec_uses_workdir() {
+  new_env
+  write_docker
+  printf 'basecamp:true:1\n' >"$TEST_CONTAINERS"
+
+  run_omaterm exec basecamp -w /home/omaterm/Work/basecamp ls
+
+  assert_file_contains "$TEST_TMP/docker-actions" "exec -w /home/omaterm/Work/basecamp basecamp bash -lc ls" "exec passes workdir to docker"
+  pass "exec uses workdir"
+}
+
+test_exec_uses_long_workdir() {
+  new_env
+  write_docker
+  printf 'basecamp:true:1\n' >"$TEST_CONTAINERS"
+
+  run_omaterm exec basecamp --workdir /home/omaterm/Work/basecamp 'pwd && ls'
+
+  assert_file_contains "$TEST_TMP/docker-actions" "exec -w /home/omaterm/Work/basecamp basecamp bash -lc pwd && ls" "exec passes long workdir to docker"
+  pass "exec uses long workdir"
 }
 
 test_rm_default() {
@@ -360,6 +449,7 @@ test_reserve_overrides() {
 }
 
 main() {
+  test_help_lists_commands
   test_default_creates_omaterm
   test_new_with_setup_seed_args
   test_new_with_op_setup_seed
@@ -368,8 +458,15 @@ main() {
   test_new_mounts_docker_with_d
   test_default_starts_existing
   test_default_attaches_running
+  test_connect_named_starts_existing
+  test_connect_named_attaches_running
+  test_connect_without_name_starts_existing
   test_multiple_uses_gum_choice
   test_ls_lists_omaterms
+  test_exec_runs_command
+  test_exec_starts_stopped_container
+  test_exec_uses_workdir
+  test_exec_uses_long_workdir
   test_rm_default
   test_rm_named
   test_rm_all

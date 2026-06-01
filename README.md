@@ -57,8 +57,10 @@ Use the installed `omaterm` command to reconnect, create additional named Omater
 
 ```bash
 omaterm
+omaterm connect omaterm2
 omaterm new omaterm2
 omaterm new omaterm2 -d # Mount the host Docker engine
+omaterm exec omaterm2 -w /home/omaterm/Work/project 'docker ps'
 omaterm ls
 omaterm rm omaterm2
 omaterm rm -a

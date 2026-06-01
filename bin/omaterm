@@ -24,7 +24,9 @@ Usage:
     [--git-name NAME] [--git-email EMAIL] [--gh-token TOKEN]
     [--ts-token TOKEN] [--ts-host HOSTNAME] [--op-token TOKEN]
     [--ssh-key PUBLIC_KEY]
+  omaterm connect [NAME]
   omaterm ls
+  omaterm exec NAME [-w|--workdir DIR] COMMAND...
   omaterm rm [-a|NAME]
 EOF
 }
@@ -370,8 +372,30 @@ run_new() {
     "$IMAGE"
 }
 
-run_start() {
-  local names name
+connect_omaterm() {
+  local name="$1"
+
+  if container_running "$name"; then
+    exec docker attach "$name"
+  else
+    exec docker start -ai "$name"
+  fi
+}
+
+run_connect() {
+  local name="${1:-}" names
+
+  if [[ -n $name ]]; then
+    validate_name "$name"
+    container_exists "$name" || {
+      echo "No such Omaterm: $name" >&2
+      exit 1
+    }
+
+    mapfile -t names < <(omaterm_names)
+    rebalance_limits "${#names[@]}"
+    connect_omaterm "$name"
+  fi
 
   mapfile -t names < <(omaterm_names)
 
@@ -383,15 +407,60 @@ run_start() {
 
   rebalance_limits "${#names[@]}"
 
-  if container_running "$name"; then
-    exec docker attach "$name"
-  else
-    exec docker start -ai "$name"
-  fi
+  connect_omaterm "$name"
 }
 
 run_ls() {
   omaterm_names
+}
+
+run_exec() {
+  local name="$1" command workdir="" docker_args=()
+  shift
+
+  validate_name "$name"
+  container_exists "$name" || {
+    echo "No such Omaterm: $name" >&2
+    exit 1
+  }
+
+  if [[ ${1:-} == "--" ]]; then
+    shift
+  fi
+
+  while (($#)); do
+    case "$1" in
+      -w | --workdir)
+        [[ -n ${2:-} ]] || {
+          usage
+          exit 2
+        }
+        workdir="${2:-}"
+        shift 2
+        ;;
+      --)
+        shift
+        break
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+
+  (($#)) || {
+    usage
+    exit 2
+  }
+
+  command="$*"
+  [[ -n $workdir ]] && docker_args+=(-w "$workdir")
+
+  if ! container_running "$name"; then
+    docker start "$name" >/dev/null
+  fi
+
+  exec docker exec "${docker_args[@]}" "$name" bash -lc "$command"
 }
 
 run_rm() {
@@ -433,7 +502,7 @@ run_rm() {
 
 case "${1:-}" in
   "")
-    run_start
+    run_connect
     ;;
   new)
     (($# >= 2)) || {
@@ -442,12 +511,26 @@ case "${1:-}" in
     }
     run_new "${@:2}"
     ;;
+  connect)
+    (($# <= 2)) || {
+      usage
+      exit 2
+    }
+    run_connect "${2:-}"
+    ;;
   ls)
     (($# == 1)) || {
       usage
       exit 2
     }
     run_ls
+    ;;
+  exec)
+    (($# >= 3)) || {
+      usage
+      exit 2
+    }
+    run_exec "${@:2}"
     ;;
   rm)
     (($# <= 2)) || {
