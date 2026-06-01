@@ -49,16 +49,11 @@ Instead of passing every value on the command line, store them as top-level fiel
 omaterm new omaterm2 --op "Omaterm Setup"
 ```
 
-Omaterm reads fields named `git-name`, `git-email`, `gh-token`, `ts-token`, `ts-host`, `op-token`, and `ssh-key`. Direct command-line values override fields from the 1Password item.
-Setup values are applied only when the container is first created; an existing `omaterm` container keeps its original environment and home directory state.
+Omaterm reads fields named `git-name`, `git-email`, `gh-token`, `ts-token`, `ts-host`, `op-token`, and `ssh-key`. Direct command-line values override fields from the 1Password item. Setup values are applied only when the container is first created; an existing `omaterm` container keeps its original environment and home directory state.
 
-## Run manually
+## Managing
 
-```bash
-docker run -it --name omaterm --label omaterm=1 --net host ghcr.io/omacom-io/omaterm
-```
-
-Then use the installed `omaterm` command to reconnect, create additional named Omaterms, or remove one:
+Use the installed `omaterm` command to reconnect, create additional named Omaterms, or remove one:
 
 ```bash
 omaterm
