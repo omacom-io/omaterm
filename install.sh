@@ -113,18 +113,8 @@ run_docker_installation() {
 
   install_omaterm_command
 
-  section "Starting Omaterm..."
-  if docker info >/dev/null 2>&1; then
-    exec "$HOME/.local/bin/omaterm"
-  elif command -v newgrp &>/dev/null && [ -t 0 ] && [ -r /dev/tty ]; then
-    exec newgrp docker <<EOF
-$HOME/.local/bin/omaterm
-EOF
-  else
-    echo "Docker is installed, but your current shell does not have access yet."
-    echo "Open a new shell, then run: omaterm"
-    exit 1
-  fi
+  echo
+  echo "Run omaterm to get started"
 }
 
 banner

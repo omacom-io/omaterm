@@ -31,4 +31,11 @@ if grep -qE 'install-native|install-docker|Install natively|run_installer' "$INS
   fail "installer should not delegate to another installer"
 fi
 
+if grep -qF 'exec "$HOME/.local/bin/omaterm"' "$INSTALL" || grep -qF 'exec newgrp docker' "$INSTALL"; then
+  fail "installer should not launch omaterm after install"
+fi
+
+grep -qF 'Run omaterm to get started' "$INSTALL" ||
+  fail "installer should tell the user how to start omaterm"
+
 pass "installer is Docker-only"

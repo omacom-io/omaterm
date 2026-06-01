@@ -23,7 +23,7 @@ curl -fsSL https://omaterm.org/install | bash
 
 On Arch, Debian/Ubuntu, and Fedora, it also installs and enables Docker. On WSL, Docker Desktop with WSL integration must already be installed and running.
 
-You'll be dropped straight into the Docker setup. You can always return to your Omaterm by calling `omaterm` from the terminal.
+Run `omaterm` to get started.
 
 ## Setup
 
