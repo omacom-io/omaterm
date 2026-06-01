@@ -19,7 +19,8 @@ usage() {
   cat >&2 <<'EOF'
 Usage:
   omaterm
-  omaterm new NAME [-d]
+  omaterm new NAME [-d] [-e|--ephemeral]
+  omaterm new [-d] -e|--ephemeral
     [--op ITEM]
     [--git-name NAME] [--git-email EMAIL] [--gh-token TOKEN]
     [--ts-token TOKEN] [--ts-host HOSTNAME] [--op-token TOKEN]
@@ -247,11 +248,10 @@ load_setup_from_op() {
 }
 
 run_new() {
-  local name="$1" tailscale_host="" mount_docker=0
+  local name="" tailscale_host="" mount_docker=0 ephemeral=0 status
   local setup_op=""
   local git_name="" git_email="" gh_token="" ts_token="" op_token="" ssh_key=""
-  local docker_args=() env_args=() existing
-  shift
+  local docker_args=() env_args=() name_args=() existing
 
   while (($#)); do
     case "$1" in
@@ -323,9 +323,18 @@ run_new() {
         mount_docker=1
         shift
         ;;
+      -e | --ephemeral)
+        ephemeral=1
+        shift
+        ;;
       *)
-        usage
-        exit 2
+        if [[ -z $name ]]; then
+          name="$1"
+          shift
+        else
+          usage
+          exit 2
+        fi
         ;;
     esac
   done
@@ -334,11 +343,20 @@ run_new() {
     load_setup_from_op "$setup_op"
   fi
 
-  validate_name "$name"
+  if [[ -z $name && $ephemeral -eq 0 ]]; then
+    usage
+    exit 2
+  fi
 
-  if container_exists "$name"; then
-    echo "Omaterm already exists: $name" >&2
-    exit 1
+  if [[ -n $name ]]; then
+    validate_name "$name"
+
+    if container_exists "$name"; then
+      echo "Omaterm already exists: $name" >&2
+      exit 1
+    fi
+
+    name_args=(--name "$name")
   fi
 
   # Adding this Omaterm shrinks every existing Omaterm's memory share; re-divide
@@ -359,17 +377,38 @@ run_new() {
   [[ -n $op_token ]] && env_args+=(-e "OMATERM_SETUP_OP_TOKEN=$op_token")
   [[ -n $ssh_key ]] && env_args+=(-e "OMATERM_SETUP_SSH_KEY=$ssh_key")
 
+  if (( ephemeral )); then
+    docker_args+=(--rm)
+  fi
+
   if (( mount_docker )); then
     docker_args+=(-v /var/run/docker.sock:/var/run/docker.sock)
   fi
 
-  exec docker run -it "${env_args[@]}" \
-    --name "$name" \
-    --label "$LABEL" \
-    --net host \
-    "${LIMIT_ARGS[@]}" \
-    "${docker_args[@]}" \
-    "$IMAGE"
+  if (( ephemeral )); then
+    set +e
+    docker run -it "${env_args[@]}" \
+      "${name_args[@]}" \
+      --label "$LABEL" \
+      --net host \
+      "${LIMIT_ARGS[@]}" \
+      "${docker_args[@]}" \
+      "$IMAGE"
+    status=$?
+    set -e
+
+    mapfile -t existing < <(omaterm_names)
+    rebalance_limits "${#existing[@]}"
+    exit "$status"
+  else
+    exec docker run -it "${env_args[@]}" \
+      "${name_args[@]}" \
+      --label "$LABEL" \
+      --net host \
+      "${LIMIT_ARGS[@]}" \
+      "${docker_args[@]}" \
+      "$IMAGE"
+  fi
 }
 
 connect_omaterm() {
