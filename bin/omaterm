@@ -592,47 +592,13 @@ run_rm() {
 }
 
 case "${1:-}" in
-  "")
-    run_connect
-    ;;
-  new)
-    (($# >= 2)) || {
-      usage
-      exit 2
-    }
-    run_new "${@:2}"
-    ;;
-  connect)
-    (($# <= 2)) || {
-      usage
-      exit 2
-    }
-    run_connect "${2:-}"
-    ;;
-  ls)
-    (($# == 1)) || {
-      usage
-      exit 2
-    }
-    run_ls
-    ;;
-  exec)
-    (($# >= 3)) || {
-      usage
-      exit 2
-    }
-    run_exec "${@:2}"
-    ;;
-  rm)
-    (($# <= 2)) || {
-      usage
-      exit 2
-    }
-    run_rm "${2:-}"
-    ;;
-  -h | --help | help)
-    usage
-    ;;
+  "")      run_connect ;;
+  new)     run_new "${@:2}" ;;
+  connect) run_connect "${2:-}" ;;
+  ls)      run_ls ;;
+  exec)    run_exec "${@:2}" ;;
+  rm)      run_rm "${2:-}" ;;
+  -h)      usage ;;
   *)
     usage
     exit 2
