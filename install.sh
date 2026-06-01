@@ -86,8 +86,4 @@ install_docker
 install_omaterm_command
 
 echo
-echo "Run omaterm to get started"
-
-if ! is_wsl; then
-  newgrp docker
-fi
+echo "Logout or run 'newgrp docker' then start omaterm"
