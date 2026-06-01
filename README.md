@@ -61,8 +61,7 @@ omaterm connect omaterm2
 omaterm new omaterm2
 omaterm new omaterm2 -d # Mount the host Docker engine
 omaterm new omaterm2 --docker-access # Long form of -d
-omaterm new -d -e # Remove the Omaterm when it exits
-omaterm new -d -e --exec 'mkdir -p Work/basecamp && cd Work/basecamp && gh repo clone basecamp/bc3 && cd bc3 && setup --reset'
+omaterm new hand --docker-access --prepare --exec 'mkdir -p Work/basecamp && cd Work/basecamp && gh repo clone basecamp/bc3 && cd bc3 && setup --reset'
 omaterm exec omaterm2 -w /home/omaterm/Work/project 'docker ps'
 omaterm ls
 omaterm rm omaterm2
@@ -70,6 +69,8 @@ omaterm rm -a
 ```
 
 The named container persists its filesystem across starts, including home directory state, installed packages, git config, shell history, and projects. Remove the Omaterm container with `docker rm omaterm` when you want to reset its shell environment. Omaterm uses host networking so services published to host localhost by containers are reachable from inside Omaterm. Use `omaterm new NAME -d` or `omaterm new NAME --docker-access` to mount the host Docker engine through `/var/run/docker.sock`.
+
+Use `--prepare` with `--exec` to start a named Omaterm in the background and wait until setup plus the bootstrap command finish. The container stays running afterward so it can receive `omaterm exec NAME ...` commands.
 
 ## Resource limits
 

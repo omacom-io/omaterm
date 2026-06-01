@@ -4,6 +4,7 @@ set -euo pipefail
 IMAGE="${OMATERM_IMAGE:-ghcr.io/omacom-io/omaterm}"
 DEFAULT_NAME="omaterm"
 LABEL="omaterm=1"
+PREPARE_DONE_MARKER="/home/omaterm/.local/state/omaterm/prepare-done"
 
 # Resource limits. The host keeps a reserved slice for itself; the rest is
 # divided across all Omaterms. CPU is shared dynamically with cpu-shares over
@@ -19,8 +20,7 @@ usage() {
   cat >&2 <<'EOF'
 Usage:
   omaterm
-  omaterm new NAME [-d|--docker-access] [-e|--ephemeral] [--exec COMMAND]
-  omaterm new [-d|--docker-access] -e|--ephemeral [--exec COMMAND]
+  omaterm new NAME [-d|--docker-access] [--prepare] [--exec COMMAND]
     [--op ITEM]
     [--git-name NAME] [--git-email EMAIL] [--gh-token TOKEN]
     [--ts-token TOKEN] [--ts-host HOSTNAME] [--op-token TOKEN]
@@ -247,12 +247,36 @@ load_setup_from_op() {
   fi
 }
 
+wait_for_prepare() {
+  local name="$1" exit_code
+
+  while true; do
+    if docker exec "$name" test -f "$PREPARE_DONE_MARKER" >/dev/null 2>&1; then
+      return 0
+    fi
+
+    if ! container_running "$name"; then
+      exit_code="$(docker inspect -f '{{.State.ExitCode}}' "$name" 2>/dev/null || true)"
+
+      if [[ -n $exit_code && $exit_code != "0" ]]; then
+        echo "Omaterm prepare failed for $name with exit status $exit_code." >&2
+        return "$exit_code"
+      fi
+
+      echo "Omaterm prepare failed for $name." >&2
+      return 1
+    fi
+
+    sleep 1
+  done
+}
+
 run_new() {
-  local name="" tailscale_host="" mount_docker=0 ephemeral=0 status
+  local name="" tailscale_host="" mount_docker=0 prepare=0 status
   local setup_op=""
   local git_name="" git_email="" gh_token="" ts_token="" op_token="" ssh_key=""
   local exec_command=""
-  local docker_args=() env_args=() name_args=() command_args=() existing
+  local docker_args=() env_args=() name_args=() command_args=() existing prepare_command
 
   while (($#)); do
     case "$1" in
@@ -332,12 +356,15 @@ run_new() {
         mount_docker=1
         shift
         ;;
-      -e | --ephemeral)
-        ephemeral=1
+      --prepare)
+        prepare=1
         shift
         ;;
       *)
-        if [[ -z $name ]]; then
+        if [[ $1 == -* ]]; then
+          usage
+          exit 2
+        elif [[ -z $name ]]; then
           name="$1"
           shift
         else
@@ -352,21 +379,19 @@ run_new() {
     load_setup_from_op "$setup_op"
   fi
 
-  if [[ -z $name && $ephemeral -eq 0 ]]; then
+  if [[ -z $name ]]; then
     usage
     exit 2
   fi
 
-  if [[ -n $name ]]; then
-    validate_name "$name"
+  validate_name "$name"
 
-    if container_exists "$name"; then
-      echo "Omaterm already exists: $name" >&2
-      exit 1
-    fi
-
-    name_args=(--name "$name")
+  if container_exists "$name"; then
+    echo "Omaterm already exists: $name" >&2
+    exit 1
   fi
+
+  name_args=(--name "$name")
 
   # Adding this Omaterm shrinks every existing Omaterm's memory share; re-divide
   # them before launching, then claim the same share for the new one.
@@ -386,34 +411,38 @@ run_new() {
   [[ -n $op_token ]] && env_args+=(-e "OMATERM_SETUP_OP_TOKEN=$op_token")
   [[ -n $ssh_key ]] && env_args+=(-e "OMATERM_SETUP_SSH_KEY=$ssh_key")
 
-  if (( ephemeral )); then
-    docker_args+=(--rm)
-  fi
-
   if (( mount_docker )); then
     docker_args+=(-v /var/run/docker.sock:/var/run/docker.sock)
   fi
 
-  if [[ -n $exec_command ]]; then
+  if (( prepare )); then
+    prepare_command="mkdir -p $(dirname "$PREPARE_DONE_MARKER") && touch $PREPARE_DONE_MARKER && exec sleep infinity"
+    if [[ -n $exec_command ]]; then
+      command_args=(-c "$exec_command && $prepare_command")
+    else
+      command_args=(-c "$prepare_command")
+    fi
+  elif [[ -n $exec_command ]]; then
     command_args=(-c "$exec_command && exec bash -l")
   fi
 
-  if (( ephemeral )); then
+  if (( prepare )); then
     set +e
-    docker run -it "${env_args[@]}" \
+    docker run -d "${env_args[@]}" \
       "${name_args[@]}" \
       --label "$LABEL" \
       --net host \
       "${LIMIT_ARGS[@]}" \
       "${docker_args[@]}" \
       "$IMAGE" \
-      "${command_args[@]}"
+      "${command_args[@]}" >/dev/null
     status=$?
     set -e
 
-    mapfile -t existing < <(omaterm_names)
-    rebalance_limits "${#existing[@]}"
-    exit "$status"
+    (( status == 0 )) || exit "$status"
+
+    wait_for_prepare "$name"
+    exit "$?"
   else
     exec docker run -it "${env_args[@]}" \
       "${name_args[@]}" \
