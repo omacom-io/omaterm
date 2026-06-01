@@ -271,6 +271,23 @@ wait_for_prepare() {
   done
 }
 
+stream_prepare_until_ready() {
+  local name="$1" logs_pid status
+
+  docker logs -f "$name" &
+  logs_pid=$!
+  sleep 0.1
+
+  set +e
+  wait_for_prepare "$name"
+  status=$?
+  kill "$logs_pid" >/dev/null 2>&1
+  wait "$logs_pid" 2>/dev/null
+  set -e
+
+  return "$status"
+}
+
 run_new() {
   local name="" tailscale_host="" mount_docker=0 prepare=0 status
   local setup_op=""
@@ -432,7 +449,7 @@ run_new() {
 
     (( status == 0 )) || exit "$status"
 
-    wait_for_prepare "$name"
+    stream_prepare_until_ready "$name"
     exit "$?"
   else
     exec docker run -it "${env_args[@]}" \

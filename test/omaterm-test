@@ -250,6 +250,7 @@ test_new_prepare_waits_until_command_finishes() {
   run_omaterm new hand --docker-access --prepare 'setup --reset'
 
   assert_file_contains "$TEST_TMP/docker-actions" "run -d --name hand --label omaterm=1 --net host $LIMITS_ONE -v /var/run/docker.sock:/var/run/docker.sock omaterm:test -c setup --reset && mkdir -p /home/omaterm/.local/state/omaterm && touch /home/omaterm/.local/state/omaterm/prepare-done && exec sleep infinity" "prepare starts named omaterm detached with bootstrap"
+  assert_file_contains "$TEST_TMP/docker-actions" "logs -f hand" "prepare streams logs"
   assert_file_contains "$TEST_TMP/docker-actions" "exec hand test -f /home/omaterm/.local/state/omaterm/prepare-done" "prepare waits for marker"
   pass "new prepare waits until command finishes"
 }
