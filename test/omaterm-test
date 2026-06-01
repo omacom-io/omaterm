@@ -151,8 +151,8 @@ test_help_lists_commands() {
 
   run_omaterm -h
 
-  assert_file_contains "$TEST_TMP/output" "omaterm new NAME [-d] [-e|--ephemeral] [-- COMMAND...]" "help lists named new"
-  assert_file_contains "$TEST_TMP/output" "omaterm new [-d] -e|--ephemeral [-- COMMAND...]" "help lists unnamed ephemeral new"
+  assert_file_contains "$TEST_TMP/output" "omaterm new NAME [-d|--docker-access] [-e|--ephemeral] [--exec COMMAND]" "help lists named new"
+  assert_file_contains "$TEST_TMP/output" "omaterm new [-d|--docker-access] -e|--ephemeral [--exec COMMAND]" "help lists unnamed ephemeral new"
   assert_file_contains "$TEST_TMP/output" "omaterm connect [NAME]" "help lists connect"
   assert_file_contains "$TEST_TMP/output" "omaterm exec NAME [-w|--workdir DIR] COMMAND..." "help lists exec workdir"
   pass "help lists commands"
@@ -234,6 +234,16 @@ test_new_mounts_docker_with_d() {
   pass "new mounts Docker with -d"
 }
 
+test_new_mounts_docker_with_long_flag() {
+  new_env
+  write_docker
+
+  run_omaterm new omaterm2 --docker-access
+
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name omaterm2 --label omaterm=1 --net host $LIMITS_ONE -v /var/run/docker.sock:/var/run/docker.sock omaterm:test" "new --docker-access mounts host Docker"
+  pass "new mounts Docker with --docker-access"
+}
+
 test_new_ephemeral_uses_rm() {
   new_env
   write_docker
@@ -287,24 +297,24 @@ test_new_ephemeral_rebalances_after_exit() {
   pass "new ephemeral rebalances after exit"
 }
 
-test_new_runs_command_after_setup() {
+test_new_exec_runs_command_after_setup() {
   new_env
   write_docker
 
-  run_omaterm new hand -- bash -lc 'echo boot'
+  run_omaterm new hand --exec 'echo boot'
 
-  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name hand --label omaterm=1 --net host $LIMITS_ONE omaterm:test bash -lc echo boot" "new passes command after image"
-  pass "new runs command after setup"
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name hand --label omaterm=1 --net host $LIMITS_ONE omaterm:test -c echo boot && exec bash -l" "new --exec passes command after image"
+  pass "new --exec runs command after setup"
 }
 
-test_new_ephemeral_without_name_runs_command() {
+test_new_ephemeral_without_name_exec_runs_command() {
   new_env
   write_docker
 
-  run_omaterm new -d -e -- bash -lc 'setup --reset'
+  run_omaterm new -d -e --exec 'setup --reset'
 
-  assert_file_contains "$TEST_TMP/docker-actions" "run -it --label omaterm=1 --net host $LIMITS_ONE --rm -v /var/run/docker.sock:/var/run/docker.sock omaterm:test bash -lc setup --reset" "ephemeral new without name passes command after image"
-  pass "new ephemeral without name runs command"
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it --label omaterm=1 --net host $LIMITS_ONE --rm -v /var/run/docker.sock:/var/run/docker.sock omaterm:test -c setup --reset && exec bash -l" "ephemeral new without name --exec passes command after image"
+  pass "new ephemeral without name --exec runs command"
 }
 
 test_default_starts_existing() {
@@ -531,13 +541,14 @@ main() {
   test_new_with_op_url_setup_seed
   test_new_cli_seed_args_override_op
   test_new_mounts_docker_with_d
+  test_new_mounts_docker_with_long_flag
   test_new_ephemeral_uses_rm
   test_new_ephemeral_mounts_docker_with_d
   test_new_ephemeral_name_is_optional
   test_new_ephemeral_without_name_mounts_docker_with_d
   test_new_ephemeral_rebalances_after_exit
-  test_new_runs_command_after_setup
-  test_new_ephemeral_without_name_runs_command
+  test_new_exec_runs_command_after_setup
+  test_new_ephemeral_without_name_exec_runs_command
   test_default_starts_existing
   test_default_attaches_running
   test_connect_named_starts_existing

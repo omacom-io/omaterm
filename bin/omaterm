@@ -19,8 +19,8 @@ usage() {
   cat >&2 <<'EOF'
 Usage:
   omaterm
-  omaterm new NAME [-d] [-e|--ephemeral] [-- COMMAND...]
-  omaterm new [-d] -e|--ephemeral [-- COMMAND...]
+  omaterm new NAME [-d|--docker-access] [-e|--ephemeral] [--exec COMMAND]
+  omaterm new [-d|--docker-access] -e|--ephemeral [--exec COMMAND]
     [--op ITEM]
     [--git-name NAME] [--git-email EMAIL] [--gh-token TOKEN]
     [--ts-token TOKEN] [--ts-host HOSTNAME] [--op-token TOKEN]
@@ -251,21 +251,25 @@ run_new() {
   local name="" tailscale_host="" mount_docker=0 ephemeral=0 status
   local setup_op=""
   local git_name="" git_email="" gh_token="" ts_token="" op_token="" ssh_key=""
+  local exec_command=""
   local docker_args=() env_args=() name_args=() command_args=() existing
 
   while (($#)); do
     case "$1" in
-      --)
-        shift
-        command_args=("$@")
-        break
-        ;;
       --op)
         [[ -n ${2:-} ]] || {
           usage
           exit 2
         }
         setup_op="${2:-}"
+        shift 2
+        ;;
+      --exec)
+        [[ -n ${2:-} ]] || {
+          usage
+          exit 2
+        }
+        exec_command="${2:-}"
         shift 2
         ;;
       --ts-host)
@@ -324,7 +328,7 @@ run_new() {
         ssh_key="${2:-}"
         shift 2
         ;;
-      -d)
+      -d | --docker-access)
         mount_docker=1
         shift
         ;;
@@ -388,6 +392,10 @@ run_new() {
 
   if (( mount_docker )); then
     docker_args+=(-v /var/run/docker.sock:/var/run/docker.sock)
+  fi
+
+  if [[ -n $exec_command ]]; then
+    command_args=(-c "$exec_command && exec bash -l")
   fi
 
   if (( ephemeral )); then
