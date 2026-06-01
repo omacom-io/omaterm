@@ -248,44 +248,27 @@ load_setup_from_op() {
 }
 
 wait_for_prepare() {
-  local name="$1" exit_code
+  local name="$1" status
 
   while true; do
-    if docker exec "$name" test -f "$PREPARE_DONE_MARKER" >/dev/null 2>&1; then
-      return 0
-    fi
-
-    if ! container_running "$name"; then
-      exit_code="$(docker inspect -f '{{.State.ExitCode}}' "$name" 2>/dev/null || true)"
-
-      if [[ -n $exit_code && $exit_code != "0" ]]; then
-        echo "Omaterm prepare failed for $name with exit status $exit_code." >&2
-        return "$exit_code"
+    # The marker holds the prepare command's exit status once it finishes.
+    if status="$(docker exec "$name" cat "$PREPARE_DONE_MARKER" 2>/dev/null)"; then
+      if [[ $status == 0 ]]; then
+        return 0
       fi
 
+      echo "Omaterm prepare failed for $name with exit status $status." >&2
+      return "$status"
+    fi
+
+    # No marker yet: if the container has already died, prepare never finished.
+    if ! container_running "$name"; then
       echo "Omaterm prepare failed for $name." >&2
       return 1
     fi
 
     sleep 1
   done
-}
-
-stream_prepare_until_ready() {
-  local name="$1" logs_pid status
-
-  docker logs -f "$name" &
-  logs_pid=$!
-  sleep 0.1
-
-  set +e
-  wait_for_prepare "$name"
-  status=$?
-  kill "$logs_pid" >/dev/null 2>&1
-  wait "$logs_pid" 2>/dev/null
-  set -e
-
-  return "$status"
 }
 
 run_new() {
@@ -430,8 +413,11 @@ run_new() {
   fi
 
   if (( prepare )); then
-    ready_command="mkdir -p $(dirname "$PREPARE_DONE_MARKER") && touch $PREPARE_DONE_MARKER"
-    command_args=(-c "if [ ! -f $PREPARE_DONE_MARKER ]; then $prepare_command && $ready_command; fi; exec bash -l")
+    # Run the prepare command once, recording its exit status to the marker
+    # whether it succeeds or fails. The container then drops to an interactive
+    # login shell either way, so a failed prepare stays attachable for
+    # inspection while wait_for_prepare can still tell it apart from success.
+    command_args=(-c "if [ ! -f $PREPARE_DONE_MARKER ]; then mkdir -p $(dirname "$PREPARE_DONE_MARKER"); if $prepare_command; then s=0; else s=\$?; fi; echo \$s >$PREPARE_DONE_MARKER.tmp && mv $PREPARE_DONE_MARKER.tmp $PREPARE_DONE_MARKER; fi; exec bash -l")
   fi
 
   if (( prepare )); then
@@ -449,7 +435,8 @@ run_new() {
 
     (( status == 0 )) || exit "$status"
 
-    stream_prepare_until_ready "$name"
+    echo "==> Preparing $name..." >&2
+    wait_for_prepare "$name"
     exit "$?"
   else
     exec docker run -it "${env_args[@]}" \
@@ -499,6 +486,23 @@ run_connect() {
   rebalance_limits "${#names[@]}"
 
   connect_omaterm "$name"
+}
+
+# Prepare state for a hand: "ready"/"failed (N)"/"preparing" for prepared hands,
+# "-" for plain interactive ones. The marker holds the prepare exit status and
+# can only be read while the container is running.
+prepare_status() {
+  local name="$1" state="$2" code
+
+  if ! docker inspect -f '{{json .Config.Cmd}}' "$name" 2>/dev/null | grep -q "$PREPARE_DONE_MARKER"; then
+    echo "-"
+  elif [[ $state != running ]]; then
+    echo "stopped"
+  elif code="$(docker exec "$name" cat "$PREPARE_DONE_MARKER" 2>/dev/null)"; then
+    [[ $code == 0 ]] && echo "ready" || echo "failed ($code)"
+  else
+    echo "preparing"
+  fi
 }
 
 run_ls() {
