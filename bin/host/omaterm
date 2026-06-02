@@ -4,7 +4,6 @@ set -euo pipefail
 IMAGE="${OMATERM_IMAGE:-ghcr.io/omacom-io/omaterm}"
 DEFAULT_NAME="omaterm"
 LABEL="omaterm=1"
-PREPARE_DONE_MARKER="/home/omaterm/.local/state/omaterm/prepare-done"
 SETUP_DONE_MARKER="/home/omaterm/.local/state/omaterm/setup-done"
 TAILSCALE_STATE_FILE="/var/lib/tailscale/tailscaled.state"
 TAILSCALE_HOSTNAME_FILE="/home/omaterm/.local/state/omaterm/tailscale-hostname"
@@ -13,11 +12,8 @@ TAILSCALE_HOSTNAME_FILE="/home/omaterm/.local/state/omaterm/tailscale-hostname"
 # keep this one lean. install.sh ships the whole bin/host directory together, so
 # they resolve next to this script wherever omaterm runs.
 OMATERM_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=bin/host/omaterm-limits
 source "$OMATERM_LIB_DIR/omaterm-limits"
-# shellcheck source=bin/host/omaterm-templates
 source "$OMATERM_LIB_DIR/omaterm-templates"
-# shellcheck source=bin/host/omaterm-op
 source "$OMATERM_LIB_DIR/omaterm-op"
 
 usage() {
@@ -25,7 +21,7 @@ usage() {
 Usage:
   omaterm
   omaterm new NAME [-t|--template TEMPLATE] [-d|--docker-access]
-    [-p|--prepare COMMAND] [--op ITEM]
+    [--op ITEM]
     [--git-name NAME] [--git-email EMAIL] [--gh-token TOKEN]
     [--ts-token TOKEN] [--ts-host HOSTNAME] [--op-token TOKEN]
     [--ssh-key PUBLIC_KEY]
@@ -97,25 +93,6 @@ choose_omaterm() {
     return
   fi
 
-  if [ -t 0 ] && [ -r /dev/tty ]; then
-    local index choice
-
-    echo "$action Omaterm:" >/dev/tty
-    index=1
-    for choice in "$@"; do
-      printf '  %d) %s\n' "$index" "$choice" >/dev/tty
-      index=$((index + 1))
-    done
-
-    while true; do
-      read -r -p "> " choice </dev/tty
-      if [[ $choice =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= $# )); then
-        printf '%s\n' "${!choice}"
-        return
-      fi
-    done
-  fi
-
   echo "Multiple Omaterm containers found. Re-run from an interactive terminal." >&2
   return 1
 }
@@ -129,42 +106,16 @@ host_ts_hostname() {
   printf '%s' "${raw:0:63}"
 }
 
-wait_for_prepare() {
-  local name="$1" status
-
-  while true; do
-    # The marker holds the prepare command's exit status once it finishes.
-    if status="$(docker exec "$name" cat "$PREPARE_DONE_MARKER" 2>/dev/null)"; then
-      if [[ $status == 0 ]]; then
-        return 0
-      fi
-
-      echo "Omaterm prepare failed for $name with exit status $status." >&2
-      return "$status"
-    fi
-
-    # No marker yet: if the container has already died, prepare never finished.
-    if ! container_running "$name"; then
-      echo "Omaterm prepare failed for $name." >&2
-      return 1
-    fi
-
-    sleep 1
-  done
-}
-
 run_new() {
-  local name="" template="" tailscale_host="" mount_docker=0 prepare=0 status
+  local name="" template="" tailscale_host="" mount_docker=0
   local setup_op="" overrides=0 image reset_cmd
   local git_name="" git_email="" gh_token="" ts_token="" op_token="" ssh_key=""
-  local prepare_command=""
-  local docker_args=() env_args=() name_args=() command_args=() all=() new_index=0 i
+  local docker_args=() env_args=() name_args=() all=() new_index=0 i
 
   while (($#)); do
     case "$1" in
       -t | --template)      template="${2:-}"; shift 2 ;;
       --op)                 setup_op="${2:-}"; overrides=1; shift 2 ;;
-      -p | --prepare)       prepare=1; prepare_command="${2:-}"; shift 2 ;;
       --ts-host)            tailscale_host="${2:-}"; overrides=1; shift 2 ;;
       --git-name)           git_name="${2:-}"; overrides=1; shift 2 ;;
       --git-email)          git_email="${2:-}"; overrides=1; shift 2 ;;
@@ -184,11 +135,6 @@ run_new() {
 
   if [[ -z $name ]]; then
     usage
-    exit 2
-  fi
-
-  if [[ -n $template && $prepare == 1 ]]; then
-    echo "Error: --prepare cannot be combined with --template." >&2
     exit 2
   fi
 
@@ -285,40 +231,13 @@ run_new() {
   [[ -n $op_token ]] && env_args+=(-e "OMATERM_SETUP_OP_TOKEN=$op_token")
   [[ -n $ssh_key ]] && env_args+=(-e "OMATERM_SETUP_SSH_KEY=$ssh_key")
 
-  if (( prepare )); then
-    # Run the prepare command once, recording its exit status to the marker
-    # whether it succeeds or fails. The container then drops to an interactive
-    # login shell either way, so a failed prepare stays attachable for
-    # inspection while wait_for_prepare can still tell it apart from success.
-    command_args=(-c "if [ ! -f $PREPARE_DONE_MARKER ]; then mkdir -p $(dirname "$PREPARE_DONE_MARKER"); if $prepare_command; then s=0; else s=\$?; fi; echo \$s >$PREPARE_DONE_MARKER.tmp && mv $PREPARE_DONE_MARKER.tmp $PREPARE_DONE_MARKER; fi; exec bash -l")
-
-    set +e
-    docker run -dit "${env_args[@]}" \
-      "${name_args[@]}" \
-      --label "$LABEL" \
-      --net host \
-      "${LIMIT_ARGS[@]}" \
-      "${docker_args[@]}" \
-      "$IMAGE" \
-      "${command_args[@]}" >/dev/null
-    status=$?
-    set -e
-
-    (( status == 0 )) || exit "$status"
-
-    echo "==> Preparing $name..." >&2
-    wait_for_prepare "$name"
-    exit "$?"
-  else
-    exec docker run -it "${env_args[@]}" \
-      "${name_args[@]}" \
-      --label "$LABEL" \
-      --net host \
-      "${LIMIT_ARGS[@]}" \
-      "${docker_args[@]}" \
-      "$IMAGE" \
-      "${command_args[@]}"
-  fi
+  exec docker run -it "${env_args[@]}" \
+    "${name_args[@]}" \
+    --label "$LABEL" \
+    --net host \
+    "${LIMIT_ARGS[@]}" \
+    "${docker_args[@]}" \
+    "$IMAGE"
 }
 
 connect_omaterm() {
@@ -359,30 +278,13 @@ run_connect() {
   connect_omaterm "$name"
 }
 
-# Prepare state for an Omaterm: "ready"/"failed (N)"/"preparing" for prepared ones,
-# "-" for plain interactive ones. The marker holds the prepare exit status and
-# can only be read while the container is running.
-prepare_status() {
-  local name="$1" state="$2" code
-
-  if ! docker inspect -f '{{json .Config.Cmd}}' "$name" 2>/dev/null | grep -q "$PREPARE_DONE_MARKER"; then
-    echo "-"
-  elif [[ $state != running ]]; then
-    echo "stopped"
-  elif code="$(docker exec "$name" cat "$PREPARE_DONE_MARKER" 2>/dev/null)"; then
-    [[ $code == 0 ]] && echo "ready" || echo "failed ($code)"
-  else
-    echo "preparing"
-  fi
-}
-
 run_ls() {
   local names name state mem_bytes mem
   mapfile -t names < <(omaterm_names)
   ((${#names[@]})) || return 0
 
   {
-    printf 'NAME\tSTATUS\tMEMORY\tPREPARE\n'
+    printf 'NAME\tSTATUS\tMEMORY\n'
     for name in "${names[@]}"; do
       state="$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || echo '?')"
 
@@ -393,7 +295,7 @@ run_ls() {
         mem="unlimited"
       fi
 
-      printf '%s\t%s\t%s\t%s\n' "$name" "$state" "$mem" "$(prepare_status "$name" "$state")"
+      printf '%s\t%s\t%s\n' "$name" "$state" "$mem"
     done
   } | column -t -s "$(printf '\t')"
 }

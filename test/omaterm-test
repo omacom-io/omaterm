@@ -94,11 +94,6 @@ if [[ ${1:-} == "image" && ${2:-} == "rm" ]]; then
   mv "$TEST_IMAGES.tmp" "$TEST_IMAGES"
 fi
 
-# wait_for_prepare polls the marker via `exec NAME cat .../prepare-done`; report success.
-if [[ ${1:-} == "exec" && "$*" == *" cat "*prepare-done* ]]; then
-  echo 0
-fi
-
 exit 0
 SH
   chmod +x "$TEST_BIN/docker"
@@ -167,6 +162,7 @@ test_help_lists_commands() {
   run_omaterm -h
 
   assert_file_contains "$TEST_TMP/output" "omaterm new NAME [-t|--template TEMPLATE] [-d|--docker-access]" "help lists new"
+  assert_file_not_contains "$TEST_TMP/output" "--prepare" "help does not list prepare"
   assert_file_contains "$TEST_TMP/output" "omaterm template create NAME --from SOURCE" "help lists template create"
   assert_file_contains "$TEST_TMP/output" "omaterm template ls" "help lists template ls"
   assert_file_contains "$TEST_TMP/output" "omaterm template rm NAME" "help lists template rm"
@@ -259,31 +255,6 @@ test_new_mounts_docker_with_long_flag() {
 
   assert_file_contains "$TEST_TMP/docker-actions" "run -it --name omaterm2 --label omaterm=1 --net host $LIMITS_ONE -v /var/run/docker.sock:/var/run/docker.sock omaterm:test" "new --docker-access mounts host Docker"
   pass "new mounts Docker with --docker-access"
-}
-
-test_new_prepare_waits_until_command_finishes() {
-  new_env
-  write_docker
-
-  run_omaterm new hand --docker-access --prepare 'setup --reset'
-
-  local expected_run
-  expected_run="run -dit --name hand --label omaterm=1 --net host $LIMITS_ONE -v /var/run/docker.sock:/var/run/docker.sock omaterm:test -c "'if [ ! -f /home/omaterm/.local/state/omaterm/prepare-done ]; then mkdir -p /home/omaterm/.local/state/omaterm; if setup --reset; then s=0; else s=$?; fi; echo $s >/home/omaterm/.local/state/omaterm/prepare-done.tmp && mv /home/omaterm/.local/state/omaterm/prepare-done.tmp /home/omaterm/.local/state/omaterm/prepare-done; fi; exec bash -l'
-  assert_file_contains "$TEST_TMP/docker-actions" "$expected_run" "prepare starts named omaterm detached with bootstrap"
-  assert_file_contains "$TEST_TMP/docker-actions" "exec hand cat /home/omaterm/.local/state/omaterm/prepare-done" "prepare waits on the exit-status marker"
-  pass "new prepare waits until command finishes"
-}
-
-test_new_prepare_short_flag_waits_until_command_finishes() {
-  new_env
-  write_docker
-
-  run_omaterm new hand -p 'echo ready'
-
-  local expected_run
-  expected_run="run -dit --name hand --label omaterm=1 --net host $LIMITS_ONE omaterm:test -c "'if [ ! -f /home/omaterm/.local/state/omaterm/prepare-done ]; then mkdir -p /home/omaterm/.local/state/omaterm; if echo ready; then s=0; else s=$?; fi; echo $s >/home/omaterm/.local/state/omaterm/prepare-done.tmp && mv /home/omaterm/.local/state/omaterm/prepare-done.tmp /home/omaterm/.local/state/omaterm/prepare-done; fi; exec bash -l'
-  assert_file_contains "$TEST_TMP/docker-actions" "$expected_run" "short prepare starts named omaterm detached with bootstrap"
-  pass "new -p waits until command finishes"
 }
 
 test_default_starts_existing() {
@@ -617,16 +588,6 @@ test_new_unknown_template_fails() {
   pass "new unknown template fails"
 }
 
-test_new_template_with_prepare_fails() {
-  new_env
-  write_docker
-
-  run_omaterm new dev1 --template ruby --prepare 'echo hi' || true
-
-  assert_file_contains "$TEST_TMP/output" "Error: --prepare cannot be combined with --template." "new rejects --prepare with --template"
-  pass "new template with prepare fails"
-}
-
 test_new_ts_token_defaults_hostname() {
   new_env
   write_docker
@@ -689,8 +650,6 @@ main() {
   test_new_cli_seed_args_override_op
   test_new_mounts_docker_with_d
   test_new_mounts_docker_with_long_flag
-  test_new_prepare_waits_until_command_finishes
-  test_new_prepare_short_flag_waits_until_command_finishes
   test_default_starts_existing
   test_default_attaches_running
   test_connect_named_starts_existing
@@ -719,7 +678,6 @@ main() {
   test_new_from_template_short_flag
   test_new_template_overrides_pass_env_and_clear_setup
   test_new_unknown_template_fails
-  test_new_template_with_prepare_fails
   test_new_ts_token_defaults_hostname
   test_new_ts_host_overrides_derived_default
   test_new_ts_host_without_token_fails
