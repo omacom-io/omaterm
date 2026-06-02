@@ -62,6 +62,33 @@ install_docker() {
   echo "✓ Docker"
 }
 
+install_gum() {
+  command -v gum &>/dev/null && return
+
+  section "Installing gum..."
+
+  if [ -f /etc/arch-release ]; then
+    sudo pacman -S --needed --noconfirm gum
+  elif [ -f /etc/debian_version ]; then
+    # gum isn't in the Debian/Ubuntu repos; add Charm's apt repo first.
+    sudo mkdir -p /etc/apt/keyrings
+    curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg
+    echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" |
+      sudo tee /etc/apt/sources.list.d/charm.list >/dev/null
+    sudo apt-get update
+    sudo apt-get install -y gum
+  elif [ -f /etc/fedora-release ]; then
+    sudo dnf install -y gum
+  else
+    echo "Error: This OS is not supported by the installer."
+    echo "Install gum manually (https://github.com/charmbracelet/gum), then run this installer again."
+    exit 1
+  fi
+
+  echo
+  echo "✓ gum"
+}
+
 install_omaterm_command() {
   local base_url file tmp_file dest
 
@@ -89,6 +116,7 @@ install_omaterm_command() {
 banner
 
 install_docker
+install_gum
 install_omaterm_command
 
 echo

@@ -55,4 +55,18 @@ fi
 grep -qF 'Run omaterm to get started' "$INSTALL" ||
   fail "installer should tell the user how to start omaterm"
 
+grep -qF 'install_gum' "$INSTALL" ||
+  fail "installer should install gum"
+
+grep -qF 'sudo pacman -S --needed --noconfirm gum' "$INSTALL" ||
+  fail "installer should install gum on Arch"
+
+grep -qF 'sudo dnf install -y gum' "$INSTALL" ||
+  fail "installer should install gum on Fedora"
+
+grep -qF 'repo.charm.sh' "$INSTALL" ||
+  fail "installer should add Charm's apt repo for gum on Debian"
+
+pass "installer installs gum across distros"
+
 pass "installer is Docker-only"
