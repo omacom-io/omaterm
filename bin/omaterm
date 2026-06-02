@@ -24,13 +24,8 @@ usage() {
   cat >&2 <<'EOF'
 Usage:
   omaterm
-  omaterm new NAME [-d|--docker-access] [-p|--prepare COMMAND]
-    [--op ITEM]
-    [--git-name NAME] [--git-email EMAIL] [--gh-token TOKEN]
-    [--ts-token TOKEN] [--ts-host HOSTNAME] [--op-token TOKEN]
-    [--ssh-key PUBLIC_KEY]
-  omaterm clone NAME --as NEWNAME [-d|--docker-access]
-    [--op ITEM]
+  omaterm new NAME [-c|--clone SOURCE] [-d|--docker-access]
+    [-p|--prepare COMMAND] [--op ITEM]
     [--git-name NAME] [--git-email EMAIL] [--gh-token TOKEN]
     [--ts-token TOKEN] [--ts-host HOSTNAME] [--op-token TOKEN]
     [--ssh-key PUBLIC_KEY]
@@ -61,6 +56,26 @@ container_exists() {
 
 container_running() {
   [[ "$(docker inspect -f '{{.State.Running}}' "$1")" == "true" ]]
+}
+
+# The docker socket is group-owned by `docker`. After the installer adds the
+# user to that group, shells started earlier still lack the GID until they
+# re-login, so docker calls fail with a permission error. If the user is a
+# member per /etc/group but this process didn't inherit the GID, re-exec under
+# the group with sg so omaterm works without a logout. The GID check is the
+# fast path: when it's already present (the normal case) we return immediately
+# without touching docker.
+ensure_docker_group() {
+  local docker_gid
+  docker_gid="$(getent group docker | cut -d: -f3)"
+
+  [[ -n $docker_gid ]] || return 0
+  id -G | grep -qw "$docker_gid" && return 0   # already have it: nothing to do
+  id -nG | grep -qw docker || return 0         # not a member: can't fix it here
+  command -v sg >/dev/null 2>&1 || return 0    # no sg: fall through to the real error
+  docker info >/dev/null 2>&1 && return 0      # reachable anyway: don't re-exec
+
+  exec sg docker -c "$(printf '%q ' "$0" "$@")"
 }
 
 host_core_count() {
@@ -281,23 +296,24 @@ wait_for_prepare() {
 }
 
 run_new() {
-  local name="" tailscale_host="" mount_docker=0 prepare=0 status
-  local setup_op=""
+  local name="" clone_source="" tailscale_host="" mount_docker=0 prepare=0 status
+  local setup_op="" overrides=0 image reset_cmd
   local git_name="" git_email="" gh_token="" ts_token="" op_token="" ssh_key=""
   local prepare_command=""
-  local docker_args=() env_args=() name_args=() command_args=() existing ready_command
+  local docker_args=() env_args=() name_args=() command_args=() existing
 
   while (($#)); do
     case "$1" in
-      --op)                 setup_op="${2:-}"; shift 2 ;;
+      -c | --clone)         clone_source="${2:-}"; shift 2 ;;
+      --op)                 setup_op="${2:-}"; overrides=1; shift 2 ;;
       -p | --prepare)       prepare=1; prepare_command="${2:-}"; shift 2 ;;
-      --ts-host)            tailscale_host="${2:-}"; shift 2 ;;
-      --git-name)           git_name="${2:-}"; shift 2 ;;
-      --git-email)          git_email="${2:-}"; shift 2 ;;
-      --gh-token)           gh_token="${2:-}"; shift 2 ;;
-      --ts-token)           ts_token="${2:-}"; shift 2 ;;
-      --op-token)           op_token="${2:-}"; shift 2 ;;
-      --ssh-key)            ssh_key="${2:-}"; shift 2 ;;
+      --ts-host)            tailscale_host="${2:-}"; overrides=1; shift 2 ;;
+      --git-name)           git_name="${2:-}"; overrides=1; shift 2 ;;
+      --git-email)          git_email="${2:-}"; overrides=1; shift 2 ;;
+      --gh-token)           gh_token="${2:-}"; overrides=1; shift 2 ;;
+      --ts-token)           ts_token="${2:-}"; overrides=1; shift 2 ;;
+      --op-token)           op_token="${2:-}"; overrides=1; shift 2 ;;
+      --ssh-key)            ssh_key="${2:-}"; overrides=1; shift 2 ;;
       -d | --docker-access) mount_docker=1; shift ;;
       -*)                   usage; exit 2 ;;
       *)                    name="$1"; shift ;;
@@ -313,11 +329,31 @@ run_new() {
     exit 2
   fi
 
+  if [[ -n $clone_source && $prepare == 1 ]]; then
+    echo "Error: --prepare cannot be combined with --clone." >&2
+    exit 2
+  fi
+
   validate_name "$name"
 
   if container_exists "$name"; then
     echo "Omaterm already exists: $name" >&2
     exit 1
+  fi
+
+  if [[ -n $clone_source ]]; then
+    validate_name "$clone_source"
+    container_exists "$clone_source" || {
+      echo "No such Omaterm: $clone_source" >&2
+      exit 1
+    }
+
+    # Snapshot the source's filesystem into a fresh image to launch the clone from.
+    image="$CLONE_IMAGE_REPO:$name"
+    echo "==> Cloning $clone_source into $name..." >&2
+    docker commit "$clone_source" "$image" >/dev/null
+  else
+    image="$IMAGE"
   fi
 
   name_args=(--name "$name")
@@ -332,6 +368,41 @@ run_new() {
     exec </dev/tty
   fi
 
+  if (( mount_docker )); then
+    docker_args+=(-v /var/run/docker.sock:/var/run/docker.sock)
+  fi
+
+  if [[ -n $clone_source ]]; then
+    # docker commit bakes the source's setup env (tokens) and Tailscale node
+    # identity into the image. Pass every setup var explicitly — empty unless
+    # overridden — so the inherited env can't silently re-apply, and always wipe
+    # the Tailscale state so the clone never shares the source's node.
+    env_args=(
+      -e "OMATERM_SETUP_TS_HOST=$tailscale_host"
+      -e "OMATERM_SETUP_GIT_NAME=$git_name"
+      -e "OMATERM_SETUP_GIT_EMAIL=$git_email"
+      -e "OMATERM_SETUP_GH_TOKEN=$gh_token"
+      -e "OMATERM_SETUP_TS_AUTH_KEY=$ts_token"
+      -e "OMATERM_SETUP_OP_TOKEN=$op_token"
+      -e "OMATERM_SETUP_SSH_KEY=$ssh_key"
+    )
+
+    # Reset the Tailscale identity, and clear the setup marker when overrides
+    # were given so omaterm-setup re-runs and applies them on first boot.
+    reset_cmd="rm -f $TAILSCALE_STATE_FILE $TAILSCALE_HOSTNAME_FILE"
+    (( overrides )) && reset_cmd+=" $SETUP_DONE_MARKER"
+
+    exec docker run -it "${env_args[@]}" \
+      "${name_args[@]}" \
+      --label "$LABEL" \
+      --net host \
+      "${LIMIT_ARGS[@]}" \
+      "${docker_args[@]}" \
+      --entrypoint bash \
+      "$image" \
+      -c "$reset_cmd; exec /home/omaterm/.local/bin/omaterm-entrypoint"
+  fi
+
   [[ -n $tailscale_host ]] && env_args+=(-e "OMATERM_SETUP_TS_HOST=$tailscale_host")
   [[ -n $git_name ]] && env_args+=(-e "OMATERM_SETUP_GIT_NAME=$git_name")
   [[ -n $git_email ]] && env_args+=(-e "OMATERM_SETUP_GIT_EMAIL=$git_email")
@@ -340,19 +411,13 @@ run_new() {
   [[ -n $op_token ]] && env_args+=(-e "OMATERM_SETUP_OP_TOKEN=$op_token")
   [[ -n $ssh_key ]] && env_args+=(-e "OMATERM_SETUP_SSH_KEY=$ssh_key")
 
-  if (( mount_docker )); then
-    docker_args+=(-v /var/run/docker.sock:/var/run/docker.sock)
-  fi
-
   if (( prepare )); then
     # Run the prepare command once, recording its exit status to the marker
     # whether it succeeds or fails. The container then drops to an interactive
     # login shell either way, so a failed prepare stays attachable for
     # inspection while wait_for_prepare can still tell it apart from success.
     command_args=(-c "if [ ! -f $PREPARE_DONE_MARKER ]; then mkdir -p $(dirname "$PREPARE_DONE_MARKER"); if $prepare_command; then s=0; else s=\$?; fi; echo \$s >$PREPARE_DONE_MARKER.tmp && mv $PREPARE_DONE_MARKER.tmp $PREPARE_DONE_MARKER; fi; exec bash -l")
-  fi
 
-  if (( prepare )); then
     set +e
     docker run -dit "${env_args[@]}" \
       "${name_args[@]}" \
@@ -380,95 +445,6 @@ run_new() {
       "$IMAGE" \
       "${command_args[@]}"
   fi
-}
-
-run_clone() {
-  local source="" name="" overrides=0 image existing reset_cmd
-  local setup_op="" mount_docker=0
-  local git_name="" git_email="" gh_token="" ts_token="" tailscale_host="" op_token="" ssh_key=""
-  local env_args=() docker_args=()
-
-  while (($#)); do
-    case "$1" in
-      --as)               name="${2:-}"; shift 2 ;;
-      --op)               setup_op="${2:-}"; overrides=1; shift 2 ;;
-      --ts-host)          tailscale_host="${2:-}"; overrides=1; shift 2 ;;
-      --git-name)         git_name="${2:-}"; overrides=1; shift 2 ;;
-      --git-email)        git_email="${2:-}"; overrides=1; shift 2 ;;
-      --gh-token)         gh_token="${2:-}"; overrides=1; shift 2 ;;
-      --ts-token)         ts_token="${2:-}"; overrides=1; shift 2 ;;
-      --op-token)         op_token="${2:-}"; overrides=1; shift 2 ;;
-      --ssh-key)          ssh_key="${2:-}"; overrides=1; shift 2 ;;
-      -d | --docker-access) mount_docker=1; shift ;;
-      -*)                 usage; exit 2 ;;
-      *)                  source="$1"; shift ;;
-    esac
-  done
-
-  [[ -n $source && -n $name ]] || { usage; exit 2; }
-
-  validate_name "$source"
-  validate_name "$name"
-
-  container_exists "$source" || {
-    echo "No such Omaterm: $source" >&2
-    exit 1
-  }
-
-  if container_exists "$name"; then
-    echo "Omaterm already exists: $name" >&2
-    exit 1
-  fi
-
-  if [[ -n $setup_op ]]; then
-    load_setup_from_op "$setup_op"
-  fi
-
-  # Snapshot the source's filesystem into a fresh image to launch the clone from.
-  image="$CLONE_IMAGE_REPO:$name"
-  echo "==> Cloning $source into $name..." >&2
-  docker commit "$source" "$image" >/dev/null
-
-  # Adding this Omaterm shrinks every existing Omaterm's memory share; re-divide
-  # them before launching, then claim the same share for the clone.
-  mapfile -t existing < <(omaterm_names)
-  rebalance_limits "$((${#existing[@]} + 1))"
-  build_limit_args "$((${#existing[@]} + 1))"
-
-  if [ -t 0 ] && [ -r /dev/tty ]; then
-    exec </dev/tty
-  fi
-
-  # docker commit bakes the source's setup env (tokens) and Tailscale node
-  # identity into the image. Pass every setup var explicitly — empty unless
-  # overridden — so the inherited env can't silently re-apply, and always wipe
-  # the Tailscale state so the clone never shares the source's node.
-  env_args=(
-    -e "OMATERM_SETUP_TS_HOST=$tailscale_host"
-    -e "OMATERM_SETUP_GIT_NAME=$git_name"
-    -e "OMATERM_SETUP_GIT_EMAIL=$git_email"
-    -e "OMATERM_SETUP_GH_TOKEN=$gh_token"
-    -e "OMATERM_SETUP_TS_AUTH_KEY=$ts_token"
-    -e "OMATERM_SETUP_OP_TOKEN=$op_token"
-    -e "OMATERM_SETUP_SSH_KEY=$ssh_key"
-  )
-
-  (( mount_docker )) && docker_args+=(-v /var/run/docker.sock:/var/run/docker.sock)
-
-  # Reset the Tailscale identity, and clear the setup marker when overrides were
-  # given so omaterm-setup re-runs and applies them on first boot.
-  reset_cmd="rm -f $TAILSCALE_STATE_FILE $TAILSCALE_HOSTNAME_FILE"
-  (( overrides )) && reset_cmd+=" $SETUP_DONE_MARKER"
-
-  exec docker run -it "${env_args[@]}" \
-    --name "$name" \
-    --label "$LABEL" \
-    --net host \
-    "${LIMIT_ARGS[@]}" \
-    "${docker_args[@]}" \
-    --entrypoint bash \
-    "$image" \
-    -c "$reset_cmd; exec /home/omaterm/.local/bin/omaterm-entrypoint"
 }
 
 connect_omaterm() {
@@ -643,10 +619,11 @@ run_rm() {
   rebalance_limits "${#names[@]}"
 }
 
+ensure_docker_group "$@"
+
 case "${1:-}" in
   "")      run_connect ;;
   new)     run_new "${@:2}" ;;
-  clone)   run_clone "${@:2}" ;;
   connect) run_connect "${2:-}" ;;
   ls)      run_ls ;;
   exec)    run_exec "${@:2}" ;;
