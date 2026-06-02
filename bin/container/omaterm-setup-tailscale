@@ -83,6 +83,10 @@ prompt_auth_key() {
     gum_input_into entered_auth_key --password --placeholder "tskey-auth-kMyk..." --prompt "Tailscale auth key: " || return 1
     auth_key_target="$entered_auth_key"
   done
+
+  # The while-condition's false exit (set once a key is entered) must not become
+  # this function's return value, or the caller treats success as failure.
+  return 0
 }
 
 setup_tailscale() {
