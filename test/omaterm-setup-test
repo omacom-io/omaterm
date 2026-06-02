@@ -2,42 +2,20 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SCRIPT="$ROOT/bin/omaterm-setup"
+SCRIPT="$ROOT/bin/container/omaterm-setup"
 
-fail() {
-  echo "not ok - $1" >&2
-  exit 1
-}
-
-pass() {
-  echo "ok - $1"
-}
-
-assert_file_contains() {
-  local file="$1" expected="$2" label="$3"
-  if ! grep -qF -- "$expected" "$file"; then
-    echo "--- $file ---" >&2
-    cat "$file" >&2 2>/dev/null || true
-    fail "$label"
-  fi
-}
-
-assert_file_not_contains() {
-  local file="$1" unexpected="$2" label="$3"
-  [[ ! -e "$file" ]] || ! grep -qF -- "$unexpected" "$file" || fail "$label"
-}
-
-assert_equals() {
-  local expected="$1" actual="$2" label="$3"
-  [[ "$actual" == "$expected" ]] || fail "$label: expected '$expected', got '$actual'"
-}
+# shellcheck source=test/helpers
+source "$(dirname "${BASH_SOURCE[0]}")/helpers"
 
 new_env() {
   TEST_TMP="$(mktemp -d)"
   TEST_HOME="$TEST_TMP/home"
   TEST_BIN="$TEST_TMP/bin"
   mkdir -p "$TEST_HOME" "$TEST_BIN"
+  # Point the Tailscale state probe at a per-test path so saved-state detection
+  # is hermetic (absent by default; a test creates it to simulate a clone).
   export TEST_TMP TEST_HOME
+  export OMATERM_TAILSCALE_STATE_FILE="$TEST_TMP/tailscaled.state"
 }
 
 write_common_fakes() {
@@ -105,11 +83,11 @@ printf '%s\n' "$*" >>"$TEST_TMP/sudo-calls"
 case "${1:-}" in
   -n)
     shift
-    if [[ "${1:-}" == "tailscale" ]]; then
-      shift
-      exec tailscale "$@"
-    fi
-    exit 0
+    case "${1:-}" in
+      tailscale) shift; exec tailscale "$@" ;;
+      test) shift; test "$@"; exit $? ;;
+      *) exit 0 ;;
+    esac
     ;;
   tailscale) shift; exec tailscale "$@" ;;
   sh|mkdir|rm) exit 0 ;;
@@ -153,7 +131,7 @@ run_setup() {
 
   set +e
   HOME="$TEST_HOME" \
-    PATH="$TEST_BIN:$ROOT/bin:$PATH" \
+    PATH="$TEST_BIN:$ROOT/bin/container:$PATH" \
     "$SCRIPT" >"$TEST_TMP/output" 2>&1
   status=$?
   set -e
@@ -181,7 +159,7 @@ SH
     OMATERM_SETUP_OP_TOKEN="ops_seed" \
     OMATERM_SETUP_SSH_KEY="ssh-ed25519 SEEDKEY seed" \
     HOME="$TEST_HOME" \
-    PATH="$TEST_BIN:$ROOT/bin:$PATH" \
+    PATH="$TEST_BIN:$ROOT/bin/container:$PATH" \
     "$SCRIPT" >"$TEST_TMP/output" 2>&1
 
   [[ ! -s "$TEST_TMP/gum-calls" ]] || fail "env seed should not prompt"
@@ -206,12 +184,38 @@ SH
 
   OMATERM_SETUP_TS_AUTH_KEY="tskey-seed" \
     HOME="$TEST_HOME" \
-    PATH="$TEST_BIN:$ROOT/bin:$PATH" \
+    PATH="$TEST_BIN:$ROOT/bin/container:$PATH" \
     "$SCRIPT" >"$TEST_TMP/output" 2>&1
 
   [[ ! -s "$TEST_TMP/gum-calls" ]] || fail "env seed without hostname should not prompt"
   [[ ! -e "$TEST_TMP/tailscale-calls" ]] || ! grep -qF "up --ssh" "$TEST_TMP/tailscale-calls" || fail "env seed without hostname should not run tailscale up"
   pass "env seed skips partial tailscale data"
+}
+
+test_env_seed_hostname_without_tailscale_identity_does_not_prompt() {
+  local status
+
+  new_env
+  write_common_fakes
+  write_gum <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TMP/gum-calls"
+exit 99
+SH
+
+  set +e
+  OMATERM_SETUP_TS_HOST="fresh-host" \
+    HOME="$TEST_HOME" \
+    PATH="$TEST_BIN:$ROOT/bin/container:$PATH" \
+    "$SCRIPT" >"$TEST_TMP/output" 2>&1
+  status=$?
+  set -e
+
+  [[ "$status" -ne 0 ]] || fail "hostname-only seed without tailscale identity should fail"
+  [[ ! -s "$TEST_TMP/gum-calls" ]] || fail "hostname-only seed without tailscale identity should not prompt"
+  assert_file_contains "$TEST_TMP/output" "Cannot set Tailscale hostname to fresh-host without an existing Tailscale node or auth key." "hostname-only seed explains missing tailscale identity"
+  [[ ! -f "$TEST_HOME/.local/state/omaterm/setup-done" ]] || fail "failing hostname-only seed should not write setup marker"
+  pass "env seed hostname-only fresh node fails without prompting"
 }
 
 test_setup_skips_banner_without_tty() {
@@ -232,7 +236,7 @@ SH
   OMATERM_SETUP_GIT_NAME="Seed User" \
     OMATERM_SETUP_GIT_EMAIL="seed@example.com" \
     HOME="$TEST_HOME" \
-    PATH="$TEST_BIN:$ROOT/bin:$PATH" \
+    PATH="$TEST_BIN:$ROOT/bin/container:$PATH" \
     "$SCRIPT" >"$TEST_TMP/output" 2>&1
 
   assert_file_contains "$TEST_TMP/gitconfig" "name=Seed User" "setup continues when clear would fail"
@@ -261,7 +265,7 @@ SH
   set +e
   OMATERM_SETUP_GH_TOKEN="ghp_seed" \
     HOME="$TEST_HOME" \
-    PATH="$TEST_BIN:$ROOT/bin:$PATH" \
+    PATH="$TEST_BIN:$ROOT/bin/container:$PATH" \
     "$SCRIPT" >"$TEST_TMP/output" 2>&1
   status=$?
   set -e
@@ -436,6 +440,59 @@ SH
   pass "manual tailscale requires auth key and stores hostname without sudo"
 }
 
+test_clone_reuses_live_tailscale_node_with_new_hostname() {
+  new_env
+  write_common_fakes
+  write_gum <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TMP/gum-calls"
+exit 99
+SH
+
+  # Simulate a clone: saved node state present and the node already up.
+  printf 'state\n' >"$OMATERM_TAILSCALE_STATE_FILE"
+  cat >"$TEST_BIN/tailscale" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TMP/tailscale-calls"
+exit 0
+SH
+  chmod +x "$TEST_BIN/tailscale"
+
+  OMATERM_SETUP_TS_HOST="clone-host" \
+    HOME="$TEST_HOME" \
+    PATH="$TEST_BIN:$ROOT/bin/container:$PATH" \
+    "$SCRIPT" >"$TEST_TMP/output" 2>&1
+
+  [[ ! -s "$TEST_TMP/gum-calls" ]] || fail "clone reuse should not prompt"
+  assert_file_contains "$TEST_TMP/tailscale-calls" "set --hostname=clone-host" "clone reuse renames live node via set"
+  assert_file_not_contains "$TEST_TMP/tailscale-calls" "auth-key" "clone reuse does not use an auth key"
+  assert_equals "clone-host" "$(cat "$TEST_HOME/.local/state/omaterm/tailscale-hostname")" "clone reuse records new hostname"
+  pass "clone reuses a live tailscale node with new hostname"
+}
+
+test_clone_brings_up_saved_tailscale_state_without_auth_key() {
+  new_env
+  write_common_fakes
+  write_gum <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TMP/gum-calls"
+exit 99
+SH
+
+  # Saved state present but the node isn't up yet (default stub: status -> 1).
+  printf 'state\n' >"$OMATERM_TAILSCALE_STATE_FILE"
+
+  OMATERM_SETUP_TS_HOST="clone-host" \
+    HOME="$TEST_HOME" \
+    PATH="$TEST_BIN:$ROOT/bin/container:$PATH" \
+    "$SCRIPT" >"$TEST_TMP/output" 2>&1
+
+  [[ ! -s "$TEST_TMP/gum-calls" ]] || fail "clone reuse should not prompt"
+  assert_file_contains "$TEST_TMP/tailscale-calls" "up --ssh --accept-routes --hostname=clone-host" "clone reuse brings up saved state under new hostname"
+  assert_file_not_contains "$TEST_TMP/tailscale-calls" "auth-key" "clone reuse from saved state needs no auth key"
+  pass "clone brings up saved tailscale state without an auth key"
+}
+
 test_github_manual_uses_helper() {
   new_env
   write_common_fakes
@@ -543,7 +600,7 @@ case "$1" in
 esac
 SH
 
-  HOME="$TEST_HOME" PATH="$TEST_BIN:$ROOT/bin:$PATH" script -qfec "$SCRIPT" "$TEST_TMP/typescript" >/dev/null 2>&1 || true
+  HOME="$TEST_HOME" PATH="$TEST_BIN:$ROOT/bin/container:$PATH" script -qfec "$SCRIPT" "$TEST_TMP/typescript" >/dev/null 2>&1 || true
 
   assert_file_contains "$TEST_TMP/op-calls" "account add --address my.1password.com --email me@example.com --secret-key A3-SECRET --signin --shorthand my" "full account path adds account with details"
   assert_equals "super-secret-password" "$(cat "$TEST_TMP/op-password")" "full account password is piped to op"
@@ -554,6 +611,7 @@ SH
 main() {
   test_env_seed_unattended
   test_env_seed_does_not_prompt_for_missing_tailscale_hostname
+  test_env_seed_hostname_without_tailscale_identity_does_not_prompt
   test_setup_skips_banner_without_tty
   test_env_seed_failure_does_not_fall_back_to_interactive_setup
   test_ctrl_c_skips_setup
@@ -562,6 +620,8 @@ main() {
   test_ctrl_c_after_tailscale_hostname_finishes_setup
   test_git_manual_uses_helper
   test_tailscale_manual_requires_auth_key_and_no_sudo_for_hostname
+  test_clone_reuses_live_tailscale_node_with_new_hostname
+  test_clone_brings_up_saved_tailscale_state_without_auth_key
   test_github_manual_uses_helper
   test_ssh_key_only_writes_authorized_keys
   test_1password_service_token_path

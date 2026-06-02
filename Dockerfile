@@ -20,9 +20,9 @@ ENV SHELL=/bin/bash
 # Install omadots
 RUN curl -fsSL https://raw.githubusercontent.com/omacom-io/omadots/refs/heads/master/install.sh | bash
 
-# Copy configs and bins
+# Copy configs and the container-side bins (host/ and dev/ stay out of the image)
 COPY --chown=omaterm:omaterm config/ /home/omaterm/.config/
-COPY --chown=omaterm:omaterm bin/ /home/omaterm/.local/bin/
+COPY --chown=omaterm:omaterm bin/container/ /home/omaterm/.local/bin/
 RUN chmod +x /home/omaterm/.local/bin/*
 
 # Auto-start tmux in .bashrc

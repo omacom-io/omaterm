@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Shared assertions for the Omaterm test suites. Source it from a suite:
+#   source "$(dirname "${BASH_SOURCE[0]}")/helpers"
+
+fail() {
+  echo "not ok - $1" >&2
+  exit 1
+}
+
+pass() {
+  echo "ok - $1"
+}
+
+assert_file_contains() {
+  local file="$1" expected="$2" label="$3"
+  if ! grep -qF -- "$expected" "$file"; then
+    echo "--- $file ---" >&2
+    cat "$file" >&2 2>/dev/null || true
+    fail "$label"
+  fi
+}
+
+assert_file_not_contains() {
+  local file="$1" unexpected="$2" label="$3"
+  [[ ! -e "$file" ]] || ! grep -qF -- "$unexpected" "$file" || fail "$label"
+}
+
+assert_equals() {
+  local expected="$1" actual="$2" label="$3"
+  [[ "$actual" == "$expected" ]] || fail "$label: expected '$expected', got '$actual'"
+}
+
+line_of() {
+  local file="$1" pattern="$2"
+  grep -nxF "$pattern" "$file" | head -n1 | cut -d: -f1
+}

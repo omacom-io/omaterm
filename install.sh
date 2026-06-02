@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-OMATERM_COMMAND=/usr/local/bin/omaterm
+OMATERM_BIN_DIR=/usr/local/bin
 
 banner() {
   clear
@@ -63,19 +63,25 @@ install_docker() {
 }
 
 install_omaterm_command() {
-  local raw_url tmp_file
+  local base_url file tmp_file dest
 
-  raw_url="https://raw.githubusercontent.com/omacom-io/omaterm/refs/heads/${OMATERM_REF:-master}/bin/omaterm"
-  tmp_file="$(mktemp)"
-  curl -fsSL "$raw_url" -o "$tmp_file"
+  # The host CLI is omaterm plus the libraries it sources; ship them side by
+  # side so the dirname-based `source` in omaterm resolves them.
+  base_url="https://raw.githubusercontent.com/omacom-io/omaterm/refs/heads/${OMATERM_REF:-master}/bin/host"
 
-  if ((EUID == 0)); then
-    install -D -m 0755 "$tmp_file" "$OMATERM_COMMAND"
-  else
-    sudo install -D -m 0755 "$tmp_file" "$OMATERM_COMMAND"
-  fi
+  for file in omaterm omaterm-limits omaterm-templates omaterm-op; do
+    tmp_file="$(mktemp)"
+    curl -fsSL "$base_url/$file" -o "$tmp_file"
+    dest="$OMATERM_BIN_DIR/$file"
 
-  rm -f "$tmp_file"
+    if ((EUID == 0)); then
+      install -D -m 0755 "$tmp_file" "$dest"
+    else
+      sudo install -D -m 0755 "$tmp_file" "$dest"
+    fi
+
+    rm -f "$tmp_file"
+  done
 
   echo "✓ Command"
 }
@@ -86,4 +92,4 @@ install_docker
 install_omaterm_command
 
 echo
-echo "Logout or run 'newgrp docker' then start omaterm"
+echo "Run omaterm to get started"

@@ -2,38 +2,20 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SCRIPT="$ROOT/bin/omaterm"
+SCRIPT="$ROOT/bin/host/omaterm"
 
-fail() {
-  echo "not ok - $1" >&2
-  exit 1
-}
-
-pass() {
-  echo "ok - $1"
-}
-
-assert_file_contains() {
-  local file="$1" expected="$2" label="$3"
-  grep -qF -- "$expected" "$file" || {
-    echo "--- $file ---" >&2
-    cat "$file" >&2 2>/dev/null || true
-    fail "$label"
-  }
-}
-
-assert_file_not_contains() {
-  local file="$1" unexpected="$2" label="$3"
-  [[ ! -e "$file" ]] || ! grep -qF -- "$unexpected" "$file" || fail "$label"
-}
+# shellcheck source=test/helpers
+source "$(dirname "${BASH_SOURCE[0]}")/helpers"
 
 new_env() {
   TEST_TMP="$(mktemp -d)"
   TEST_BIN="$TEST_TMP/bin"
   TEST_CONTAINERS="$TEST_TMP/containers"
+  TEST_IMAGES="$TEST_TMP/images"
   mkdir -p "$TEST_BIN"
   : >"$TEST_CONTAINERS"
-  export TEST_TMP TEST_CONTAINERS
+  : >"$TEST_IMAGES"
+  export TEST_TMP TEST_CONTAINERS TEST_IMAGES
 }
 
 write_docker() {
@@ -79,7 +61,19 @@ if [[ ${1:-} == "inspect" && ${2:-} == "-f" ]]; then
   exit 0
 fi
 
-# Record the action, then drop removed containers so omaterm_names reflects it.
+# Template images live in TEST_IMAGES, one "repo:tag" per line.
+if [[ ${1:-} == "image" && ${2:-} == "inspect" ]]; then
+  grep -qxF "${3:-}" "$TEST_IMAGES" 2>/dev/null && exit 0 || exit 1
+fi
+
+if [[ ${1:-} == "image" && ${2:-} == "ls" ]]; then
+  while IFS= read -r ref; do
+    [[ $ref == "${3:-}":* ]] && printf '%s\t%s\t%s\n' "${ref#*:}" "100MB" "1 minute ago"
+  done <"$TEST_IMAGES" 2>/dev/null
+  exit 0
+fi
+
+# Record the action, then reconcile container/image state so later reads reflect it.
 printf '%s\n' "$*" >>"$TEST_TMP/docker-actions"
 
 if [[ ${1:-} == "rm" ]]; then
@@ -91,9 +85,30 @@ if [[ ${1:-} == "rm" ]]; then
   done
 fi
 
+if [[ ${1:-} == "commit" ]]; then
+  printf '%s\n' "${3:-}" >>"$TEST_IMAGES"
+fi
+
+if [[ ${1:-} == "image" && ${2:-} == "rm" ]]; then
+  grep -vxF "${3:-}" "$TEST_IMAGES" >"$TEST_IMAGES.tmp" 2>/dev/null || true
+  mv "$TEST_IMAGES.tmp" "$TEST_IMAGES"
+fi
+
+# wait_for_prepare polls the marker via `exec NAME cat .../prepare-done`; report success.
+if [[ ${1:-} == "exec" && "$*" == *" cat "*prepare-done* ]]; then
+  echo 0
+fi
+
 exit 0
 SH
   chmod +x "$TEST_BIN/docker"
+
+  # Fixed host hostname so derived Tailscale names are deterministic in tests.
+  cat >"$TEST_BIN/hostname" <<'SH'
+#!/usr/bin/env bash
+printf 'testhost\n'
+SH
+  chmod +x "$TEST_BIN/hostname"
 }
 
 write_gum() {
@@ -151,7 +166,10 @@ test_help_lists_commands() {
 
   run_omaterm -h
 
-  assert_file_contains "$TEST_TMP/output" "omaterm new NAME [-d|--docker-access] [-p|--prepare COMMAND]" "help lists new"
+  assert_file_contains "$TEST_TMP/output" "omaterm new NAME [-t|--template TEMPLATE] [-d|--docker-access]" "help lists new"
+  assert_file_contains "$TEST_TMP/output" "omaterm template create NAME --from SOURCE" "help lists template create"
+  assert_file_contains "$TEST_TMP/output" "omaterm template ls" "help lists template ls"
+  assert_file_contains "$TEST_TMP/output" "omaterm template rm NAME" "help lists template rm"
   assert_file_contains "$TEST_TMP/output" "omaterm connect [NAME]" "help lists connect"
   assert_file_contains "$TEST_TMP/output" "omaterm exec NAME [-w|--workdir DIR] COMMAND..." "help lists exec workdir"
   pass "help lists commands"
@@ -249,9 +267,10 @@ test_new_prepare_waits_until_command_finishes() {
 
   run_omaterm new hand --docker-access --prepare 'setup --reset'
 
-  assert_file_contains "$TEST_TMP/docker-actions" "run -dit --name hand --label omaterm=1 --net host $LIMITS_ONE -v /var/run/docker.sock:/var/run/docker.sock omaterm:test -c if [ ! -f /home/omaterm/.local/state/omaterm/prepare-done ]; then setup --reset && mkdir -p /home/omaterm/.local/state/omaterm && touch /home/omaterm/.local/state/omaterm/prepare-done; fi; exec bash -l" "prepare starts named omaterm detached with bootstrap"
-  assert_file_contains "$TEST_TMP/docker-actions" "logs -f hand" "prepare streams logs"
-  assert_file_contains "$TEST_TMP/docker-actions" "exec hand test -f /home/omaterm/.local/state/omaterm/prepare-done" "prepare waits for marker"
+  local expected_run
+  expected_run="run -dit --name hand --label omaterm=1 --net host $LIMITS_ONE -v /var/run/docker.sock:/var/run/docker.sock omaterm:test -c "'if [ ! -f /home/omaterm/.local/state/omaterm/prepare-done ]; then mkdir -p /home/omaterm/.local/state/omaterm; if setup --reset; then s=0; else s=$?; fi; echo $s >/home/omaterm/.local/state/omaterm/prepare-done.tmp && mv /home/omaterm/.local/state/omaterm/prepare-done.tmp /home/omaterm/.local/state/omaterm/prepare-done; fi; exec bash -l'
+  assert_file_contains "$TEST_TMP/docker-actions" "$expected_run" "prepare starts named omaterm detached with bootstrap"
+  assert_file_contains "$TEST_TMP/docker-actions" "exec hand cat /home/omaterm/.local/state/omaterm/prepare-done" "prepare waits on the exit-status marker"
   pass "new prepare waits until command finishes"
 }
 
@@ -261,7 +280,9 @@ test_new_prepare_short_flag_waits_until_command_finishes() {
 
   run_omaterm new hand -p 'echo ready'
 
-  assert_file_contains "$TEST_TMP/docker-actions" "run -dit --name hand --label omaterm=1 --net host $LIMITS_ONE omaterm:test -c if [ ! -f /home/omaterm/.local/state/omaterm/prepare-done ]; then echo ready && mkdir -p /home/omaterm/.local/state/omaterm && touch /home/omaterm/.local/state/omaterm/prepare-done; fi; exec bash -l" "short prepare starts named omaterm detached with bootstrap"
+  local expected_run
+  expected_run="run -dit --name hand --label omaterm=1 --net host $LIMITS_ONE omaterm:test -c "'if [ ! -f /home/omaterm/.local/state/omaterm/prepare-done ]; then mkdir -p /home/omaterm/.local/state/omaterm; if echo ready; then s=0; else s=$?; fi; echo $s >/home/omaterm/.local/state/omaterm/prepare-done.tmp && mv /home/omaterm/.local/state/omaterm/prepare-done.tmp /home/omaterm/.local/state/omaterm/prepare-done; fi; exec bash -l'
+  assert_file_contains "$TEST_TMP/docker-actions" "$expected_run" "short prepare starts named omaterm detached with bootstrap"
   pass "new -p waits until command finishes"
 }
 
@@ -434,9 +455,11 @@ test_new_rebalances_existing() {
 
   run_omaterm new omaterm3
 
-  # (65536 - 2048) / 3 Omaterms = 21162 MB each.
-  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name omaterm3 --label omaterm=1 --net host --cpuset-cpus 1-19 --cpu-shares 1024 --memory 21162m --memory-swap 21162m omaterm:test" "new claims its divided share"
-  assert_file_contains "$TEST_TMP/docker-actions" "update --cpuset-cpus 1-19 --cpu-shares 1024 --memory 21162m --memory-swap 21162m omaterm2" "new re-divides existing Omaterm memory"
+  # 19 shared cores split 3 ways → 1-7, 8-13, 14-19 (earlier Omaterms absorb the
+  # remainder). (65536 - 2048) / 3 Omaterms = 21162 MB each.
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name omaterm3 --label omaterm=1 --net host --cpuset-cpus 14-19 --cpu-shares 1024 --memory 21162m --memory-swap 21162m omaterm:test" "new claims its own CPU slice and divided memory"
+  assert_file_contains "$TEST_TMP/docker-actions" "update --cpuset-cpus 1-7 --cpu-shares 1024 --memory 21162m --memory-swap 21162m omaterm" "new re-slices the first existing Omaterm"
+  assert_file_contains "$TEST_TMP/docker-actions" "update --cpuset-cpus 8-13 --cpu-shares 1024 --memory 21162m --memory-swap 21162m omaterm2" "new re-slices the second existing Omaterm"
   pass "new rebalances existing"
 }
 
@@ -447,8 +470,9 @@ test_rm_rebalances_remaining() {
 
   run_omaterm rm omaterm3
 
-  # Survivors split (65536 - 2048) / 2 = 31744 MB each.
-  assert_file_contains "$TEST_TMP/docker-actions" "update --cpuset-cpus 1-19 --cpu-shares 1024 --memory 31744m --memory-swap 31744m omaterm2" "rm grows survivors' memory share"
+  # Survivors split 19 cores → 1-10, 11-19 and (65536 - 2048) / 2 = 31744 MB each.
+  assert_file_contains "$TEST_TMP/docker-actions" "update --cpuset-cpus 1-10 --cpu-shares 1024 --memory 31744m --memory-swap 31744m omaterm" "rm regrows the first survivor's slice"
+  assert_file_contains "$TEST_TMP/docker-actions" "update --cpuset-cpus 11-19 --cpu-shares 1024 --memory 31744m --memory-swap 31744m omaterm2" "rm regrows the second survivor's slice"
   pass "rm rebalances remaining"
 }
 
@@ -481,6 +505,181 @@ test_reserve_overrides() {
   pass "reserve overrides"
 }
 
+test_template_create_commits_source() {
+  new_env
+  write_docker
+  printf 'omaterm2:false:1\n' >"$TEST_CONTAINERS"
+
+  run_omaterm template create ruby --from omaterm2
+
+  assert_file_contains "$TEST_TMP/docker-actions" "commit omaterm2 omaterm-template:ruby" "template create commits the source into a named image"
+  pass "template create commits source"
+}
+
+test_template_create_requires_from() {
+  new_env
+  write_docker
+  printf 'omaterm2:false:1\n' >"$TEST_CONTAINERS"
+
+  run_omaterm template create ruby || true
+
+  assert_file_contains "$TEST_TMP/output" "Usage:" "template create without --from prints usage"
+  pass "template create requires --from"
+}
+
+test_template_create_unknown_source_fails() {
+  new_env
+  write_docker
+
+  run_omaterm template create ruby --from ghost || true
+
+  assert_file_contains "$TEST_TMP/output" "No such Omaterm: ghost" "template create rejects a missing source"
+  pass "template create rejects unknown source"
+}
+
+test_template_ls_lists_templates() {
+  new_env
+  write_docker
+  printf 'omaterm-template:ruby\nomaterm-template:rails\n' >"$TEST_IMAGES"
+
+  run_omaterm template ls
+
+  assert_file_contains "$TEST_TMP/output" "ruby" "template ls lists ruby"
+  assert_file_contains "$TEST_TMP/output" "rails" "template ls lists rails"
+  pass "template ls lists templates"
+}
+
+test_template_rm_removes_template() {
+  new_env
+  write_docker
+  printf 'omaterm-template:ruby\n' >"$TEST_IMAGES"
+
+  run_omaterm template rm ruby
+
+  assert_file_contains "$TEST_TMP/docker-actions" "image rm omaterm-template:ruby" "template rm removes the image"
+  pass "template rm removes template"
+}
+
+test_template_rm_unknown_fails() {
+  new_env
+  write_docker
+
+  run_omaterm template rm ghost || true
+
+  assert_file_contains "$TEST_TMP/output" "No such template: ghost" "template rm rejects a missing template"
+  pass "template rm rejects unknown template"
+}
+
+test_new_from_template_boots_with_reset() {
+  new_env
+  write_docker
+  printf 'omaterm-template:ruby\n' >"$TEST_IMAGES"
+
+  run_omaterm new dev1 --template ruby
+
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it -e OMATERM_SETUP_TS_HOST= -e OMATERM_SETUP_GIT_NAME= -e OMATERM_SETUP_GIT_EMAIL= -e OMATERM_SETUP_GH_TOKEN= -e OMATERM_SETUP_TS_AUTH_KEY= -e OMATERM_SETUP_OP_TOKEN= -e OMATERM_SETUP_SSH_KEY= --name dev1 --label omaterm=1 --net host $LIMITS_ONE --entrypoint bash omaterm-template:ruby -c rm -f /var/lib/tailscale/tailscaled.state /home/omaterm/.local/state/omaterm/tailscale-hostname /home/omaterm/.local/state/omaterm/setup-done; exec /home/omaterm/.local/bin/omaterm-entrypoint" "new --template boots from the template image and resets Tailscale identity"
+  pass "new from template boots with reset"
+}
+
+test_new_from_template_short_flag() {
+  new_env
+  write_docker
+  printf 'omaterm-template:ruby\n' >"$TEST_IMAGES"
+
+  run_omaterm new dev1 -t ruby
+
+  assert_file_contains "$TEST_TMP/docker-actions" "--entrypoint bash omaterm-template:ruby" "new -t is the short form of --template"
+  pass "new from template short flag"
+}
+
+test_new_template_overrides_pass_env_and_clear_setup() {
+  new_env
+  write_docker
+  printf 'omaterm-template:ruby\n' >"$TEST_IMAGES"
+
+  run_omaterm new dev2 --template ruby \
+    --git-email me@example.com --ts-host dev2 --ts-token tskey-x
+
+  assert_file_contains "$TEST_TMP/docker-actions" "-e OMATERM_SETUP_GIT_EMAIL=me@example.com" "template override passes git email"
+  assert_file_contains "$TEST_TMP/docker-actions" "-e OMATERM_SETUP_TS_HOST=dev2 " "template override passes Tailscale hostname"
+  assert_file_contains "$TEST_TMP/docker-actions" "-e OMATERM_SETUP_TS_AUTH_KEY=tskey-x" "template override passes Tailscale auth key"
+  assert_file_contains "$TEST_TMP/docker-actions" "/home/omaterm/.local/state/omaterm/setup-done" "template spawn always clears the setup marker"
+  pass "new template overrides pass env and clear setup"
+}
+
+test_new_unknown_template_fails() {
+  new_env
+  write_docker
+
+  run_omaterm new dev1 --template ghost || true
+
+  assert_file_contains "$TEST_TMP/output" "No such template: ghost" "new rejects a missing template"
+  pass "new unknown template fails"
+}
+
+test_new_template_with_prepare_fails() {
+  new_env
+  write_docker
+
+  run_omaterm new dev1 --template ruby --prepare 'echo hi' || true
+
+  assert_file_contains "$TEST_TMP/output" "Error: --prepare cannot be combined with --template." "new rejects --prepare with --template"
+  pass "new template with prepare fails"
+}
+
+test_new_ts_token_defaults_hostname() {
+  new_env
+  write_docker
+
+  run_omaterm new bokka-bc3 --ts-token tskey-x
+
+  assert_file_contains "$TEST_TMP/docker-actions" "-e OMATERM_SETUP_TS_HOST=testhost-bokka-bc3 " "ts-token without ts-host derives <host>-<name>"
+  assert_file_contains "$TEST_TMP/docker-actions" "-e OMATERM_SETUP_TS_AUTH_KEY=tskey-x" "derived hostname still passes the auth key"
+  pass "new with ts-token defaults the hostname"
+}
+
+test_new_ts_host_overrides_derived_default() {
+  new_env
+  write_docker
+
+  run_omaterm new bokka-bc3 --ts-token tskey-x --ts-host chosen
+
+  assert_file_contains "$TEST_TMP/docker-actions" "-e OMATERM_SETUP_TS_HOST=chosen " "explicit --ts-host wins over the derived default"
+  assert_file_not_contains "$TEST_TMP/docker-actions" "testhost-bokka-bc3" "derived default is not used when --ts-host is given"
+  pass "explicit ts-host overrides derived default"
+}
+
+test_new_ts_host_without_token_fails() {
+  new_env
+  write_docker
+
+  run_omaterm new bokka-bc3 --ts-host myhost || true
+
+  assert_file_contains "$TEST_TMP/output" "Error: --ts-host needs --ts-token" "ts-host without a token fails fast on the host"
+  pass "new ts-host without token fails"
+}
+
+test_new_without_ts_token_does_not_derive_hostname() {
+  new_env
+  write_docker
+
+  run_omaterm new bokka-bc3
+
+  assert_file_not_contains "$TEST_TMP/docker-actions" "OMATERM_SETUP_TS_HOST" "no token means no derived hostname (interactive setup stays interactive)"
+  pass "new without ts-token does not derive hostname"
+}
+
+test_new_template_ts_token_defaults_hostname() {
+  new_env
+  write_docker
+  printf 'omaterm-template:ruby\n' >"$TEST_IMAGES"
+
+  run_omaterm new dev2 --template ruby --ts-token tskey-x
+
+  assert_file_contains "$TEST_TMP/docker-actions" "-e OMATERM_SETUP_TS_HOST=testhost-dev2 " "template spawn derives <host>-<name> from a token"
+  pass "new from template with ts-token defaults the hostname"
+}
+
 main() {
   test_help_lists_commands
   test_default_creates_omaterm
@@ -510,6 +709,22 @@ main() {
   test_rm_rebalances_remaining
   test_no_limits_opts_out
   test_reserve_overrides
+  test_template_create_commits_source
+  test_template_create_requires_from
+  test_template_create_unknown_source_fails
+  test_template_ls_lists_templates
+  test_template_rm_removes_template
+  test_template_rm_unknown_fails
+  test_new_from_template_boots_with_reset
+  test_new_from_template_short_flag
+  test_new_template_overrides_pass_env_and_clear_setup
+  test_new_unknown_template_fails
+  test_new_template_with_prepare_fails
+  test_new_ts_token_defaults_hostname
+  test_new_ts_host_overrides_derived_default
+  test_new_ts_host_without_token_fails
+  test_new_without_ts_token_does_not_derive_hostname
+  test_new_template_ts_token_defaults_hostname
 }
 
 main "$@"

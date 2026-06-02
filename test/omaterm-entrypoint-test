@@ -2,22 +2,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ENTRYPOINT="$ROOT/bin/omaterm-entrypoint"
+ENTRYPOINT="$ROOT/bin/container/omaterm-entrypoint"
 DOCKERFILE="$ROOT/Dockerfile"
 
-fail() {
-  echo "not ok - $1" >&2
-  exit 1
-}
-
-pass() {
-  echo "ok - $1"
-}
-
-line_of() {
-  local file="$1" pattern="$2"
-  grep -nxF "$pattern" "$file" | head -n1 | cut -d: -f1
-}
+# shellcheck source=test/helpers
+source "$(dirname "${BASH_SOURCE[0]}")/helpers"
 
 grep -qF 'NOPASSWD: ALL' "$DOCKERFILE" ||
   fail "Docker image should keep passwordless sudo inside Omaterm"
@@ -30,12 +19,25 @@ if grep -qF 'omaterm-tailscale' "$ENTRYPOINT"; then
   fail "entrypoint should not add a separate tailscale sudoers rule"
 fi
 
-if grep -qF 'OMATERM_DOCKER' "$ENTRYPOINT" "$DOCKERFILE" "$ROOT/bin/omaterm-setup-tailscale"; then
+if grep -qF 'OMATERM_DOCKER' "$ENTRYPOINT" "$DOCKERFILE" "$ROOT/bin/container/omaterm-setup-tailscale"; then
   fail "Docker-only setup should not need a native-vs-Docker mode flag"
+fi
+
+grep -qF 'groupmod -g "$socket_gid" docker' "$ENTRYPOINT" ||
+  fail "entrypoint should align the docker group with the host socket gid"
+
+grep -qF 'usermod -aG docker omaterm' "$ENTRYPOINT" ||
+  fail "entrypoint should add omaterm to the docker group"
+
+if grep -qF 'docker-host' "$ENTRYPOINT" || grep -qF 'docker-$socket_gid' "$ENTRYPOINT"; then
+  fail "entrypoint should not invent alternate docker group names"
 fi
 
 grep -qF 'start_tailscaled' "$ENTRYPOINT" ||
   fail "entrypoint should start tailscaled before setup"
+
+grep -qF -- '--tun=userspace-networking' "$ENTRYPOINT" ||
+  fail "entrypoint should run tailscaled without requiring /dev/net/tun"
 
 setup_line="$(grep -nF '/home/omaterm/.local/bin/omaterm-setup' "$ENTRYPOINT" | tail -n1 | cut -d: -f1)"
 tailscaled_line="$(line_of "$ENTRYPOINT" 'start_tailscaled')"

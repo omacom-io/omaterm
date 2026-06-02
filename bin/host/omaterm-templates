@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# Omaterm templates: capture a configured Omaterm into a reusable image once,
+# then stamp out cheap copy-on-write copies with `omaterm new --template`.
+# Sourced by `omaterm`; relies on its validate_name, container_exists, and usage
+# helpers. The spawn side (booting `new --template` from one of these images)
+# lives in omaterm's run_new, which also reads TEMPLATE_IMAGE_REPO.
+TEMPLATE_IMAGE_REPO="omaterm-template"
+
+template_create() {
+  local name="" source="" image commit_error
+
+  while (($#)); do
+    case "$1" in
+      --from) source="${2:-}"; shift 2 ;;
+      -*)     usage; exit 2 ;;
+      *)      name="$1"; shift ;;
+    esac
+  done
+
+  [[ -n $name && -n $source ]] || { usage; exit 2; }
+
+  validate_name "$name"
+  validate_name "$source"
+
+  container_exists "$source" || {
+    echo "No such Omaterm: $source" >&2
+    exit 1
+  }
+
+  # Snapshot the source's filesystem into a named template image once. commit
+  # shares the base image's layers, so it stays small on disk — but it needs
+  # that base image still intact, which it isn't once the base was re-pulled or
+  # rebuilt out from under the running Omaterm.
+  image="$TEMPLATE_IMAGE_REPO:$name"
+  echo "==> Creating template $name from $source..." >&2
+  if ! commit_error="$(docker commit "$source" "$image" 2>&1 >/dev/null)"; then
+    echo "Error: could not create template from $source: $commit_error" >&2
+    echo "Its base image is missing — likely re-pulled or rebuilt since $source was created." >&2
+    echo "Recreate $source from the current image, then make the template." >&2
+    exit 1
+  fi
+
+  echo "==> Template $name ready. Stamp boxes from it: omaterm new NAME --template $name" >&2
+}
+
+template_ls() {
+  local lines
+  mapfile -t lines < <(docker image ls "$TEMPLATE_IMAGE_REPO" \
+    --format '{{.Tag}}	{{.Size}}	{{.CreatedSince}}' | sort)
+  ((${#lines[@]})) || return 0
+
+  {
+    printf 'TEMPLATE\tSIZE\tCREATED\n'
+    printf '%s\n' "${lines[@]}"
+  } | column -t -s "$(printf '\t')"
+}
+
+template_rm() {
+  local name="${1:-}"
+
+  [[ -n $name ]] || { usage; exit 2; }
+  validate_name "$name"
+
+  docker image inspect "$TEMPLATE_IMAGE_REPO:$name" >/dev/null 2>&1 || {
+    echo "No such template: $name" >&2
+    exit 1
+  }
+
+  docker image rm "$TEMPLATE_IMAGE_REPO:$name" >/dev/null
+  echo "==> Removed template $name" >&2
+}
+
+run_template() {
+  local sub="${1:-}"
+
+  case "$sub" in
+    create) template_create "${@:2}" ;;
+    ls)     template_ls ;;
+    rm)     template_rm "${2:-}" ;;
+    *)      usage; exit 2 ;;
+  esac
+}

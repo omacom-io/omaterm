@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# Load Omaterm setup secrets from a 1Password item for `omaterm new --op`.
+# Sourced by `omaterm`; load_setup_from_op fills the caller's git_name,
+# git_email, gh_token, ts_token, tailscale_host, op_token, and ssh_key locals
+# (only where still empty, so explicit flags win), relying on its usage of
+# dynamic scope inside run_new.
+
+require_command() {
+  local command_name="$1"
+
+  if ! command -v "$command_name" >/dev/null 2>&1; then
+    echo "Error: --op requires '$command_name' on the host." >&2
+    exit 1
+  fi
+}
+
+op_item_field() {
+  local item_json="$1" field="$2"
+
+  printf '%s' "$item_json" |
+    jq -r --arg field "$field" '
+      (.fields // []) |
+      (
+        map(select((.section? == null) and (.label == $field or .id == $field))) +
+        map(select(.label == $field or .id == $field))
+      ) |
+      .[0].value // empty
+    '
+}
+
+op_item_json() {
+  local op_ref="$1" path vault item extra
+
+  if [[ $op_ref == op://* ]]; then
+    path="${op_ref#op://}"
+    IFS=/ read -r vault item extra <<<"$path"
+
+    if [[ -z $vault || -z $item || -n $extra ]]; then
+      echo "Error: --op expects an item reference like op://VAULT/ITEM, not a field reference." >&2
+      return 1
+    fi
+
+    op item get "$item" --vault "$vault" --format json
+  else
+    op item get "$op_ref" --format json
+  fi
+}
+
+load_setup_from_op() {
+  local op_ref="$1" item_json value loaded=0
+
+  require_command op
+  require_command jq
+
+  item_json="$(op_item_json "$op_ref")" || {
+    echo "Error: could not read 1Password item: $op_ref" >&2
+    exit 1
+  }
+
+  value="$(op_item_field "$item_json" "git-name")"
+  if [[ -n $value && -z $git_name ]]; then git_name="$value"; loaded=1; fi
+  value="$(op_item_field "$item_json" "git-email")"
+  if [[ -n $value && -z $git_email ]]; then git_email="$value"; loaded=1; fi
+  value="$(op_item_field "$item_json" "gh-token")"
+  if [[ -n $value && -z $gh_token ]]; then gh_token="$value"; loaded=1; fi
+  value="$(op_item_field "$item_json" "ts-token")"
+  if [[ -n $value && -z $ts_token ]]; then ts_token="$value"; loaded=1; fi
+  value="$(op_item_field "$item_json" "ts-host")"
+  if [[ -n $value && -z $tailscale_host ]]; then tailscale_host="$value"; loaded=1; fi
+  value="$(op_item_field "$item_json" "op-token")"
+  if [[ -n $value && -z $op_token ]]; then op_token="$value"; loaded=1; fi
+  value="$(op_item_field "$item_json" "ssh-key")"
+  if [[ -n $value && -z $ssh_key ]]; then ssh_key="$value"; loaded=1; fi
+
+  if (( ! loaded )); then
+    echo "Error: 1Password item has no recognized Omaterm setup fields." >&2
+    echo "Expected top-level fields: git-name, git-email, gh-token, ts-token, ts-host, op-token, ssh-key." >&2
+    exit 1
+  fi
+}

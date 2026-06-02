@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# Host resource limits for Omaterm containers. Sourced by `omaterm`; relies on
+# its container_exists helper.
+#
+# The host keeps a reserved slice of cores for itself; the rest are partitioned
+# into disjoint, contiguous CPU sets — one per Omaterm — so workers in different
+# Omaterms never land on the same cores. Sharing a cpuset causes scheduler
+# contention, and outright collisions when apps pin workers to CPU IDs (both
+# Omaterms pin to the same cores). A lone Omaterm still gets every non-reserved
+# core; the set is re-divided as Omaterms come and go. Memory is hard-partitioned
+# evenly by Omaterm count. When there are more Omaterms than cores to divide,
+# cpuset partitioning is skipped and cpu-shares provides fair sharing instead.
+# Set OMATERM_NO_LIMITS=1 to opt out entirely.
+HOST_RESERVE_CORES="${OMATERM_HOST_RESERVE_CORES:-1}"
+HOST_RESERVE_RAM_MB="${OMATERM_HOST_RESERVE_RAM_MB:-2048}"
+CPU_SHARES="${OMATERM_CPU_SHARES:-1024}"
+
+host_core_count() {
+  echo "${OMATERM_TOTAL_CORES:-$(nproc 2>/dev/null || echo 0)}"
+}
+
+host_total_ram_mb() {
+  if [[ -n ${OMATERM_TOTAL_RAM_MB:-} ]]; then
+    echo "$OMATERM_TOTAL_RAM_MB"
+    return
+  fi
+
+  awk '/^MemTotal:/ { printf "%d", $2 / 1024; ok = 1 } END { if (!ok) print 0 }' /proc/meminfo 2>/dev/null || echo 0
+}
+
+# Contiguous CPU slice for Omaterm `index` (0-based) out of `count`, reserving
+# the first HOST_RESERVE_CORES cores for the host and splitting the rest evenly
+# (earlier Omaterms absorb any remainder). Fails (prints nothing) when there
+# aren't enough cores to give every Omaterm at least one — callers then fall
+# back to a shared cpuset via cpu-shares.
+omaterm_cpuset() {
+  local index="$1" count="$2" cores avail base rem start size
+  cores="$(host_core_count)"
+  avail=$((cores - HOST_RESERVE_CORES))
+
+  if ((count < 1 || avail < count)); then
+    return 1
+  fi
+
+  base=$((avail / count))
+  rem=$((avail % count))
+  start=$((HOST_RESERVE_CORES + index * base + (index < rem ? index : rem)))
+  size=$((base + (index < rem ? 1 : 0)))
+
+  printf '%d-%d' "$start" "$((start + size - 1))"
+}
+
+# Per-Omaterm memory in MB once the host reserve is divided across `count`
+# Omaterms. Fails when the reserve leaves nothing to share.
+omaterm_mem_mb() {
+  local count="$1" avail
+  avail="$(($(host_total_ram_mb) - HOST_RESERVE_RAM_MB))"
+
+  if ((count < 1 || avail < 1)); then
+    return 1
+  fi
+
+  printf '%d' "$((avail / count))"
+}
+
+# Fill the global LIMIT_ARGS array with docker resource flags for Omaterm
+# `index` of a layout of `count` Omaterms.
+build_limit_args() {
+  local count="$1" index="$2" cpuset mem
+  LIMIT_ARGS=()
+
+  if [[ -n ${OMATERM_NO_LIMITS:-} ]]; then
+    return
+  fi
+
+  if cpuset="$(omaterm_cpuset "$index" "$count")"; then
+    LIMIT_ARGS+=(--cpuset-cpus "$cpuset")
+  fi
+
+  LIMIT_ARGS+=(--cpu-shares "$CPU_SHARES")
+
+  if mem="$(omaterm_mem_mb "$count")"; then
+    LIMIT_ARGS+=(--memory "${mem}m" --memory-swap "${mem}m")
+  fi
+}
+
+# Re-divide host resources across the given complete, ordered set of Omaterms,
+# giving each its own CPU slice and an even memory share. Names that don't have
+# a container yet (e.g. one about to be created) are skipped.
+rebalance_limits() {
+  local names=("$@") count="${#names[@]}" index name mem
+
+  ((count)) || return 0
+
+  if mem="$(omaterm_mem_mb "$count")"; then
+    echo "==> Dividing host resources across $count Omaterm(s): ${mem}m memory each" >&2
+  fi
+
+  for index in "${!names[@]}"; do
+    name="${names[index]}"
+    container_exists "$name" || continue
+
+    build_limit_args "$count" "$index"
+    ((${#LIMIT_ARGS[@]})) || continue
+
+    docker update "${LIMIT_ARGS[@]}" "$name" >/dev/null 2>&1 ||
+      echo "Warning: could not apply resource limits to $name" >&2
+  done
+}

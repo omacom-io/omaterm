@@ -38,8 +38,8 @@ setup_unattended() {
 
   SETUP_UNATTENDED=1
 
-  if [[ -n ${OMATERM_SETUP_TS_AUTH_KEY:-} && -n ${OMATERM_SETUP_TS_HOST:-} ]]; then
-    omaterm-setup-tailscale --auth-key "$OMATERM_SETUP_TS_AUTH_KEY" || exit 1
+  if [[ -n ${OMATERM_SETUP_TS_HOST:-} ]]; then
+    omaterm-setup-tailscale --auth-key "${OMATERM_SETUP_TS_AUTH_KEY:-}" || exit 1
   fi
 
   if [[ -n ${OMATERM_SETUP_GIT_NAME:-} && -n ${OMATERM_SETUP_GIT_EMAIL:-} ]]; then

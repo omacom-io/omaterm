@@ -6,14 +6,8 @@ INSTALL="$ROOT/install.sh"
 NATIVE_INSTALL="$ROOT/install-native.sh"
 DOCKER_INSTALL="$ROOT/install-docker.sh"
 
-fail() {
-  echo "not ok - $1" >&2
-  exit 1
-}
-
-pass() {
-  echo "ok - $1"
-}
+# shellcheck source=test/helpers
+source "$(dirname "${BASH_SOURCE[0]}")/helpers"
 
 [[ ! -e $NATIVE_INSTALL ]] ||
   fail "native installer should not exist"
@@ -27,11 +21,14 @@ grep -qF 'install_docker' "$INSTALL" ||
 grep -qF 'sudo apt-get install -y docker.io' "$INSTALL" ||
   fail "installer should install Docker packages directly"
 
-grep -qF 'OMATERM_COMMAND=/usr/local/bin/omaterm' "$INSTALL" ||
+grep -qF 'OMATERM_BIN_DIR=/usr/local/bin' "$INSTALL" ||
   fail "installer should put omaterm on the default system PATH"
 
-grep -qF 'install -D -m 0755 "$tmp_file" "$OMATERM_COMMAND"' "$INSTALL" ||
+grep -qF 'install -D -m 0755 "$tmp_file" "$dest"' "$INSTALL" ||
   fail "installer should overwrite the omaterm command in place"
+
+grep -qF 'for file in omaterm omaterm-limits omaterm-templates omaterm-op' "$INSTALL" ||
+  fail "installer should ship the omaterm libraries alongside the command"
 
 if grep -qF '$HOME/.local/bin' "$INSTALL"; then
   fail "installer should not rely on a shell rc PATH change"
@@ -51,8 +48,9 @@ grep -qF 'sudo groupadd -f docker' "$INSTALL" ||
 grep -qF 'sudo usermod -aG docker "${USER:-$(id -un)}"' "$INSTALL" ||
   fail "installer should add the user to the docker group"
 
-grep -qF 'newgrp docker' "$INSTALL" ||
-  fail "installer should enter the docker group after setup"
+if grep -qF 'newgrp docker' "$INSTALL"; then
+  fail "installer should rely on omaterm group handling instead of newgrp guidance"
+fi
 
 grep -qF 'Run omaterm to get started' "$INSTALL" ||
   fail "installer should tell the user how to start omaterm"

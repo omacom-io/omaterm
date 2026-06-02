@@ -2,7 +2,7 @@
 set -euo pipefail
 
 COMMAND="${1:-}"
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DOCKER_CONFIG_DIR=""
 
 cleanup() {
@@ -14,7 +14,7 @@ trap cleanup EXIT
 
 usage() {
   cat >&2 <<'EOF'
-Usage: omaterm-build test|run|push
+Usage: omaterm-build local|test|run|push
 
 omaterm-build local builds omaterm:local
 omaterm-build test  builds omaterm:local and runs a disposable container using host Docker and networking

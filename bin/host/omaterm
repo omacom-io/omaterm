@@ -8,27 +8,30 @@ PREPARE_DONE_MARKER="/home/omaterm/.local/state/omaterm/prepare-done"
 SETUP_DONE_MARKER="/home/omaterm/.local/state/omaterm/setup-done"
 TAILSCALE_STATE_FILE="/var/lib/tailscale/tailscaled.state"
 TAILSCALE_HOSTNAME_FILE="/home/omaterm/.local/state/omaterm/tailscale-hostname"
-CLONE_IMAGE_REPO="omaterm-clone"
 
-# Resource limits. The host keeps a reserved slice for itself; the rest is
-# divided across all Omaterms. CPU is shared dynamically with cpu-shares over
-# the cores not reserved for the host (full box when one runs alone, fair split
-# under contention). Memory is hard-partitioned evenly by Omaterm count, since
-# memory can't degrade gracefully the way CPU does. Set OMATERM_NO_LIMITS=1 to
-# opt out entirely.
-HOST_RESERVE_CORES="${OMATERM_HOST_RESERVE_CORES:-1}"
-HOST_RESERVE_RAM_MB="${OMATERM_HOST_RESERVE_RAM_MB:-2048}"
-CPU_SHARES="${OMATERM_CPU_SHARES:-1024}"
+# Resource limits, templates, and the 1Password loader live in sibling files to
+# keep this one lean. install.sh ships the whole bin/host directory together, so
+# they resolve next to this script wherever omaterm runs.
+OMATERM_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bin/host/omaterm-limits
+source "$OMATERM_LIB_DIR/omaterm-limits"
+# shellcheck source=bin/host/omaterm-templates
+source "$OMATERM_LIB_DIR/omaterm-templates"
+# shellcheck source=bin/host/omaterm-op
+source "$OMATERM_LIB_DIR/omaterm-op"
 
 usage() {
   cat >&2 <<'EOF'
 Usage:
   omaterm
-  omaterm new NAME [-c|--clone SOURCE] [-d|--docker-access]
+  omaterm new NAME [-t|--template TEMPLATE] [-d|--docker-access]
     [-p|--prepare COMMAND] [--op ITEM]
     [--git-name NAME] [--git-email EMAIL] [--gh-token TOKEN]
     [--ts-token TOKEN] [--ts-host HOSTNAME] [--op-token TOKEN]
     [--ssh-key PUBLIC_KEY]
+  omaterm template create NAME --from SOURCE
+  omaterm template ls
+  omaterm template rm NAME
   omaterm connect [NAME]
   omaterm ls
   omaterm exec NAME [-w|--workdir DIR] COMMAND...
@@ -78,86 +81,6 @@ ensure_docker_group() {
   exec sg docker -c "$(printf '%q ' "$0" "$@")"
 }
 
-host_core_count() {
-  echo "${OMATERM_TOTAL_CORES:-$(nproc 2>/dev/null || echo 0)}"
-}
-
-host_total_ram_mb() {
-  if [[ -n ${OMATERM_TOTAL_RAM_MB:-} ]]; then
-    echo "$OMATERM_TOTAL_RAM_MB"
-    return
-  fi
-
-  awk '/^MemTotal:/ { printf "%d", $2 / 1024; ok = 1 } END { if (!ok) print 0 }' /proc/meminfo 2>/dev/null || echo 0
-}
-
-# CPU set reserving the first HOST_RESERVE_CORES cores for the host. Fails (and
-# prints nothing) when there aren't enough cores to leave the host its reserve.
-omaterm_cpuset() {
-  local cores
-  cores="$(host_core_count)"
-
-  if ((cores - HOST_RESERVE_CORES < 1)); then
-    return 1
-  fi
-
-  printf '%d-%d' "$HOST_RESERVE_CORES" "$((cores - 1))"
-}
-
-# Per-Omaterm memory in MB once the host reserve is divided across `count`
-# Omaterms. Fails when the reserve leaves nothing to share.
-omaterm_mem_mb() {
-  local count="$1" avail
-  avail="$(($(host_total_ram_mb) - HOST_RESERVE_RAM_MB))"
-
-  if ((count < 1 || avail < 1)); then
-    return 1
-  fi
-
-  printf '%d' "$((avail / count))"
-}
-
-# Fill the global LIMIT_ARGS array with docker resource flags for a layout of
-# `count` Omaterms.
-build_limit_args() {
-  local count="$1" cpuset mem
-  LIMIT_ARGS=()
-
-  if [[ -n ${OMATERM_NO_LIMITS:-} ]]; then
-    return
-  fi
-
-  if cpuset="$(omaterm_cpuset)"; then
-    LIMIT_ARGS+=(--cpuset-cpus "$cpuset")
-  fi
-
-  LIMIT_ARGS+=(--cpu-shares "$CPU_SHARES")
-
-  if mem="$(omaterm_mem_mb "$count")"; then
-    LIMIT_ARGS+=(--memory "${mem}m" --memory-swap "${mem}m")
-  fi
-}
-
-# Re-divide host resources across every existing Omaterm for a total of `count`.
-rebalance_limits() {
-  local count="$1" name mem names
-
-  build_limit_args "$count"
-  ((${#LIMIT_ARGS[@]})) || return 0
-
-  mapfile -t names < <(omaterm_names)
-  ((${#names[@]})) || return 0
-
-  if mem="$(omaterm_mem_mb "$count")"; then
-    echo "==> Dividing host resources across $count Omaterm(s): ${mem}m memory each" >&2
-  fi
-
-  for name in "${names[@]}"; do
-    docker update "${LIMIT_ARGS[@]}" "$name" >/dev/null 2>&1 ||
-      echo "Warning: could not apply resource limits to $name" >&2
-  done
-}
-
 choose_omaterm() {
   local action="$1"
   shift
@@ -197,78 +120,13 @@ choose_omaterm() {
   return 1
 }
 
-require_command() {
-  local command_name="$1"
-
-  if ! command -v "$command_name" >/dev/null 2>&1; then
-    echo "Error: --op requires '$command_name' on the host." >&2
-    exit 1
-  fi
-}
-
-op_item_field() {
-  local item_json="$1" field="$2"
-
-  printf '%s' "$item_json" |
-    jq -r --arg field "$field" '
-      (.fields // []) |
-      (
-        map(select((.section? == null) and (.label == $field or .id == $field))) +
-        map(select(.label == $field or .id == $field))
-      ) |
-      .[0].value // empty
-    '
-}
-
-op_item_json() {
-  local op_ref="$1" path vault item extra
-
-  if [[ $op_ref == op://* ]]; then
-    path="${op_ref#op://}"
-    IFS=/ read -r vault item extra <<<"$path"
-
-    if [[ -z $vault || -z $item || -n $extra ]]; then
-      echo "Error: --op expects an item reference like op://VAULT/ITEM, not a field reference." >&2
-      return 1
-    fi
-
-    op item get "$item" --vault "$vault" --format json
-  else
-    op item get "$op_ref" --format json
-  fi
-}
-
-load_setup_from_op() {
-  local op_ref="$1" item_json value loaded=0
-
-  require_command op
-  require_command jq
-
-  item_json="$(op_item_json "$op_ref")" || {
-    echo "Error: could not read 1Password item: $op_ref" >&2
-    exit 1
-  }
-
-  value="$(op_item_field "$item_json" "git-name")"
-  if [[ -n $value && -z $git_name ]]; then git_name="$value"; loaded=1; fi
-  value="$(op_item_field "$item_json" "git-email")"
-  if [[ -n $value && -z $git_email ]]; then git_email="$value"; loaded=1; fi
-  value="$(op_item_field "$item_json" "gh-token")"
-  if [[ -n $value && -z $gh_token ]]; then gh_token="$value"; loaded=1; fi
-  value="$(op_item_field "$item_json" "ts-token")"
-  if [[ -n $value && -z $ts_token ]]; then ts_token="$value"; loaded=1; fi
-  value="$(op_item_field "$item_json" "ts-host")"
-  if [[ -n $value && -z $tailscale_host ]]; then tailscale_host="$value"; loaded=1; fi
-  value="$(op_item_field "$item_json" "op-token")"
-  if [[ -n $value && -z $op_token ]]; then op_token="$value"; loaded=1; fi
-  value="$(op_item_field "$item_json" "ssh-key")"
-  if [[ -n $value && -z $ssh_key ]]; then ssh_key="$value"; loaded=1; fi
-
-  if (( ! loaded )); then
-    echo "Error: 1Password item has no recognized Omaterm setup fields." >&2
-    echo "Expected top-level fields: git-name, git-email, gh-token, ts-token, ts-host, op-token, ssh-key." >&2
-    exit 1
-  fi
+# Tailscale hostname derived from the host and Omaterm name ("<host>-<name>",
+# e.g. dhh-fd-bokka-bc3), reduced to the letters/numbers/hyphens Tailscale allows
+# and capped at its 63-character limit.
+host_ts_hostname() {
+  local raw="$(hostname)-$1"
+  raw="$(printf '%s' "$raw" | tr -c 'a-zA-Z0-9-' '-' | sed -E 's/-+/-/g; s/^-+//; s/-+$//')"
+  printf '%s' "${raw:0:63}"
 }
 
 wait_for_prepare() {
@@ -296,15 +154,15 @@ wait_for_prepare() {
 }
 
 run_new() {
-  local name="" clone_source="" tailscale_host="" mount_docker=0 prepare=0 status
+  local name="" template="" tailscale_host="" mount_docker=0 prepare=0 status
   local setup_op="" overrides=0 image reset_cmd
   local git_name="" git_email="" gh_token="" ts_token="" op_token="" ssh_key=""
   local prepare_command=""
-  local docker_args=() env_args=() name_args=() command_args=() existing
+  local docker_args=() env_args=() name_args=() command_args=() all=() new_index=0 i
 
   while (($#)); do
     case "$1" in
-      -c | --clone)         clone_source="${2:-}"; shift 2 ;;
+      -t | --template)      template="${2:-}"; shift 2 ;;
       --op)                 setup_op="${2:-}"; overrides=1; shift 2 ;;
       -p | --prepare)       prepare=1; prepare_command="${2:-}"; shift 2 ;;
       --ts-host)            tailscale_host="${2:-}"; overrides=1; shift 2 ;;
@@ -329,40 +187,57 @@ run_new() {
     exit 2
   fi
 
-  if [[ -n $clone_source && $prepare == 1 ]]; then
-    echo "Error: --prepare cannot be combined with --clone." >&2
+  if [[ -n $template && $prepare == 1 ]]; then
+    echo "Error: --prepare cannot be combined with --template." >&2
     exit 2
   fi
 
   validate_name "$name"
+
+  # With a Tailscale auth key but no explicit hostname, name the node after the
+  # host and the box (dhh-fd-bokka-bc3) so an unattended bring-up is identifiable.
+  if [[ -n $ts_token && -z $tailscale_host ]]; then
+    tailscale_host="$(host_ts_hostname "$name")"
+  fi
+
+  # A hostname can't register a fresh node on its own — Tailscale needs an auth
+  # key. Fail here with a clear message instead of a container that exits during
+  # setup when omaterm-setup-tailscale can't bring the node up.
+  if [[ -n $tailscale_host && -z $ts_token ]]; then
+    echo "Error: --ts-host needs --ts-token (a new Omaterm registers a fresh Tailscale node)." >&2
+    exit 2
+  fi
 
   if container_exists "$name"; then
     echo "Omaterm already exists: $name" >&2
     exit 1
   fi
 
-  if [[ -n $clone_source ]]; then
-    validate_name "$clone_source"
-    container_exists "$clone_source" || {
-      echo "No such Omaterm: $clone_source" >&2
+  if [[ -n $template ]]; then
+    validate_name "$template"
+    image="$TEMPLATE_IMAGE_REPO:$template"
+    docker image inspect "$image" >/dev/null 2>&1 || {
+      echo "No such template: $template" >&2
+      echo "Create one first: omaterm template create $template --from SOURCE" >&2
+      echo "List templates with: omaterm template ls" >&2
       exit 1
     }
-
-    # Snapshot the source's filesystem into a fresh image to launch the clone from.
-    image="$CLONE_IMAGE_REPO:$name"
-    echo "==> Cloning $clone_source into $name..." >&2
-    docker commit "$clone_source" "$image" >/dev/null
   else
     image="$IMAGE"
   fi
 
   name_args=(--name "$name")
 
-  # Adding this Omaterm shrinks every existing Omaterm's memory share; re-divide
-  # them before launching, then claim the same share for the new one.
-  mapfile -t existing < <(omaterm_names)
-  rebalance_limits "$((${#existing[@]} + 1))"
-  build_limit_args "$((${#existing[@]} + 1))"
+  # Adding this Omaterm re-slices CPU and shrinks every Omaterm's memory share.
+  # Build the full ordered set (existing Omaterms plus this one), re-divide the
+  # existing ones, then claim this Omaterm's own slice by its position in the set.
+  mapfile -t all < <(omaterm_names; echo "$name")
+  mapfile -t all < <(printf '%s\n' "${all[@]}" | sort -u)
+  for i in "${!all[@]}"; do
+    [[ ${all[i]} == "$name" ]] && new_index="$i"
+  done
+  rebalance_limits "${all[@]}"
+  build_limit_args "${#all[@]}" "$new_index"
 
   if [ -t 0 ] && [ -r /dev/tty ]; then
     exec </dev/tty
@@ -372,11 +247,13 @@ run_new() {
     docker_args+=(-v /var/run/docker.sock:/var/run/docker.sock)
   fi
 
-  if [[ -n $clone_source ]]; then
-    # docker commit bakes the source's setup env (tokens) and Tailscale node
-    # identity into the image. Pass every setup var explicitly — empty unless
-    # overridden — so the inherited env can't silently re-apply, and always wipe
-    # the Tailscale state so the clone never shares the source's node.
+  if [[ -n $template ]]; then
+    # The template image bakes in the source's setup env (tokens) and Tailscale
+    # node identity. Pass every setup var explicitly — empty unless overridden —
+    # so the baked-in env can't silently re-apply. Always wipe the Tailscale
+    # state and clear the setup marker: every box stamped from a template is its
+    # own machine, so it must register a fresh Tailscale node (not fight the
+    # source over one identity) and re-run setup to apply its own --ts-host/token.
     env_args=(
       -e "OMATERM_SETUP_TS_HOST=$tailscale_host"
       -e "OMATERM_SETUP_GIT_NAME=$git_name"
@@ -387,10 +264,7 @@ run_new() {
       -e "OMATERM_SETUP_SSH_KEY=$ssh_key"
     )
 
-    # Reset the Tailscale identity, and clear the setup marker when overrides
-    # were given so omaterm-setup re-runs and applies them on first boot.
-    reset_cmd="rm -f $TAILSCALE_STATE_FILE $TAILSCALE_HOSTNAME_FILE"
-    (( overrides )) && reset_cmd+=" $SETUP_DONE_MARKER"
+    reset_cmd="rm -f $TAILSCALE_STATE_FILE $TAILSCALE_HOSTNAME_FILE $SETUP_DONE_MARKER; "
 
     exec docker run -it "${env_args[@]}" \
       "${name_args[@]}" \
@@ -400,7 +274,7 @@ run_new() {
       "${docker_args[@]}" \
       --entrypoint bash \
       "$image" \
-      -c "$reset_cmd; exec /home/omaterm/.local/bin/omaterm-entrypoint"
+      -c "${reset_cmd}exec /home/omaterm/.local/bin/omaterm-entrypoint"
   fi
 
   [[ -n $tailscale_host ]] && env_args+=(-e "OMATERM_SETUP_TS_HOST=$tailscale_host")
@@ -468,7 +342,7 @@ run_connect() {
     }
 
     mapfile -t names < <(omaterm_names)
-    rebalance_limits "${#names[@]}"
+    rebalance_limits "${names[@]}"
     connect_omaterm "$name"
   fi
 
@@ -480,12 +354,12 @@ run_connect() {
 
   name="$(choose_omaterm "Start" "${names[@]}")"
 
-  rebalance_limits "${#names[@]}"
+  rebalance_limits "${names[@]}"
 
   connect_omaterm "$name"
 }
 
-# Prepare state for a hand: "ready"/"failed (N)"/"preparing" for prepared hands,
+# Prepare state for an Omaterm: "ready"/"failed (N)"/"preparing" for prepared ones,
 # "-" for plain interactive ones. The marker holds the prepare exit status and
 # can only be read while the container is running.
 prepare_status() {
@@ -573,9 +447,11 @@ run_exec() {
   exec docker exec "${docker_args[@]}" "$name" bash -lc "$command"
 }
 
-# Drop the snapshot image a clone was launched from, if it had one.
-remove_clone_image() {
-  docker image rm "$CLONE_IMAGE_REPO:$1" >/dev/null 2>&1 || true
+# Reclaim dangling (untagged) images left behind by replaced templates or
+# rebuilt base images. Only touches images no container references, so live
+# Omaterms, templates, and their base images are safe.
+prune_dangling_images() {
+  docker image prune -f >/dev/null 2>&1 || true
 }
 
 run_rm() {
@@ -590,9 +466,7 @@ run_rm() {
     fi
 
     docker rm -f "${names[@]}"
-    for name in "${names[@]}"; do
-      remove_clone_image "$name"
-    done
+    prune_dangling_images
     return
   elif [[ -n $name ]]; then
     validate_name "$name"
@@ -612,23 +486,24 @@ run_rm() {
   fi
 
   docker rm -f "$name"
-  remove_clone_image "$name"
+  prune_dangling_images
 
-  # One fewer Omaterm means a larger memory share for the survivors.
+  # One fewer Omaterm means a larger CPU slice and memory share for the rest.
   mapfile -t names < <(omaterm_names)
-  rebalance_limits "${#names[@]}"
+  rebalance_limits "${names[@]}"
 }
 
 ensure_docker_group "$@"
 
 case "${1:-}" in
-  "")      run_connect ;;
-  new)     run_new "${@:2}" ;;
-  connect) run_connect "${2:-}" ;;
-  ls)      run_ls ;;
-  exec)    run_exec "${@:2}" ;;
-  rm)      run_rm "${2:-}" ;;
-  -h)      usage ;;
+  "")       run_connect ;;
+  new)      run_new "${@:2}" ;;
+  template) run_template "${@:2}" ;;
+  connect)  run_connect "${2:-}" ;;
+  ls)       run_ls ;;
+  exec)     run_exec "${@:2}" ;;
+  rm)       run_rm "${2:-}" ;;
+  -h)       usage ;;
   *)
     usage
     exit 2

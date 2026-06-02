@@ -61,14 +61,26 @@ omaterm connect omaterm2
 omaterm new omaterm2
 omaterm new omaterm2 -d # Mount the host Docker engine
 omaterm new omaterm2 --docker-access # Long form of -d
-omaterm new omaterm3 --clone omaterm2 # Snapshot an existing Omaterm into a new one
-omaterm new omaterm3 -c omaterm2 --git-email me@example.com # Clone, overriding setup
 omaterm new hand --docker-access --prepare 'mkdir -p Work/basecamp && cd Work/basecamp && gh repo clone basecamp/bc3 && cd bc3 && setup --reset'
 omaterm exec omaterm2 -w /home/omaterm/Work/project 'docker ps'
 omaterm ls
 omaterm rm omaterm2
 omaterm rm -a
 ```
+
+Set up one Omaterm the way you like it, then capture it as a reusable template and stamp out fresh boxes from it instantly:
+
+```bash
+omaterm template create ruby --from omaterm2 # One-time snapshot (slow, copies the box)
+omaterm new dev1 --template ruby             # Instant — boots from the template
+omaterm new dev2 -t ruby --ts-token tskey-... # Registers its own Tailscale node, named for the box
+omaterm template ls                          # List templates
+omaterm template rm ruby                     # Remove a template
+```
+
+`template create` pays the cost of snapshotting the box once; each `new --template` after that is a near-instant copy-on-write copy. Every box stamped from a template registers a fresh Tailscale node rather than fighting the source over one identity, while baked-in tools, packages, and git config carry over.
+
+When you pass `--ts-token` without `--ts-host`, the Tailscale hostname defaults to `<host>-<name>` — e.g. creating `bokka-bc3` on host `dhh-fd` registers as `dhh-fd-bokka-bc3`. Pass `--ts-host` to choose a name explicitly.
 
 The named container persists its filesystem across starts, including home directory state, installed packages, git config, shell history, and projects. Remove the Omaterm container with `docker rm omaterm` when you want to reset its shell environment. Omaterm uses host networking so services published to host localhost by containers are reachable from inside Omaterm. Use `omaterm new NAME -d` or `omaterm new NAME --docker-access` to mount the host Docker engine through `/var/run/docker.sock`.
 

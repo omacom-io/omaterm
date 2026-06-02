@@ -16,46 +16,26 @@ tailscaled_running() {
 }
 
 start_tailscaled() {
+  tailscaled_running && return 0
+
   mkdir -p "$(dirname "$TAILSCALE_SOCKET")" "$(dirname "$TAILSCALE_STATE")"
+  rm -f "$TAILSCALE_SOCKET"
 
-  local tun_args=(--tun=userspace-networking)
-  if [ -w /dev/net/tun ]; then
-    tun_args=()
-  fi
-
-  if ! tailscaled_running; then
-    rm -f "$TAILSCALE_SOCKET"
-    tailscaled \
-      "${tun_args[@]}" \
-      --state="$TAILSCALE_STATE" \
-      --socket="$TAILSCALE_SOCKET" \
-      >/var/log/tailscaled.log 2>&1 &
-  fi
+  tailscaled \
+    --tun=userspace-networking \
+    --state="$TAILSCALE_STATE" \
+    --socket="$TAILSCALE_SOCKET" \
+    >/var/log/tailscaled.log 2>&1 &
 }
 
 ensure_host_docker_access() {
   [ -S "$HOST_DOCKER_SOCKET" ] || return 0
 
-  local socket_gid group_name
+  local socket_gid
 
   socket_gid="$(stat -c '%g' "$HOST_DOCKER_SOCKET")"
-  group_name="$(getent group "$socket_gid" | cut -d: -f1 || true)"
-
-  if [ -z "$group_name" ]; then
-    if getent group docker &>/dev/null; then
-      group_name="docker-host"
-    else
-      group_name="docker"
-    fi
-
-    if getent group "$group_name" &>/dev/null; then
-      group_name="docker-$socket_gid"
-    fi
-
-    groupadd -g "$socket_gid" "$group_name"
-  fi
-
-  usermod -aG "$group_name" omaterm
+  groupmod -g "$socket_gid" docker
+  usermod -aG docker omaterm
 }
 
 ensure_host_docker_access

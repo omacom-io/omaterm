@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Run every Omaterm test suite (the test/*-test files) and summarize.
+set -uo pipefail
+
+TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+failed=0
+
+for suite in "$TEST_DIR"/*-test; do
+  echo "==> ${suite##*/}"
+  if bash "$suite"; then
+    :
+  else
+    failed=$((failed + 1))
+  fi
+  echo
+done
+
+if ((failed)); then
+  echo "$failed suite(s) failed." >&2
+  exit 1
+fi
+
+echo "All suites passed."

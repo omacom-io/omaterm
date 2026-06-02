@@ -6,6 +6,7 @@ SETUP_HELPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SETUP_HELPER_DIR/omaterm-setup-helper"
 
 TAILSCALE_HOSTNAME_FILE="$HOME/.local/state/omaterm/tailscale-hostname"
+TAILSCALE_STATE_FILE="${OMATERM_TAILSCALE_STATE_FILE:-/var/lib/tailscale/tailscaled.state}"
 AUTH_KEY=""
 
 usage() {
@@ -25,11 +26,7 @@ while (($#)); do
   esac
 done
 
-tailscale_up() {
-  sudo -n tailscale up "$@" || return 1
-}
-
-prompt_hostname() {
+set_hostname() {
   local -n target="$1"
   local current_name entered_hostname
 
@@ -64,27 +61,57 @@ prompt_hostname() {
   done
 }
 
-setup_tailscale() {
-  local tailnet_hostname="" tailscale_auth_key="$AUTH_KEY"
+has_saved_state() {
+  sudo -n test -s "$TAILSCALE_STATE_FILE"
+}
 
-  if tailscale status &>/dev/null; then
-    return 0
+prompt_auth_key() {
+  local -n auth_key_target="$1"
+  local tailnet_hostname="$2"
+  local entered_auth_key
+
+  if [[ -n ${OMATERM_SETUP_TS_HOST:-} ]]; then
+    echo "Cannot set Tailscale hostname to $tailnet_hostname without an existing Tailscale node or auth key." >&2
+    return 1
   fi
 
-  prompt_hostname tailnet_hostname || return 1
-  [[ -n $tailnet_hostname ]] || return 1
-
-  while [[ -z $tailscale_auth_key ]]; do
+  while [[ -z $auth_key_target ]]; do
     echo "Grab a new auth key from the 'generate install script' block on:"
     echo "https://login.tailscale.com/admin/machines/new-linux"
     echo
 
-    gum_input_into tailscale_auth_key --password --placeholder "tskey-auth-kMyk..." --prompt "Tailscale auth key: " || return 1
+    gum_input_into entered_auth_key --password --placeholder "tskey-auth-kMyk..." --prompt "Tailscale auth key: " || return 1
+    auth_key_target="$entered_auth_key"
   done
+}
+
+setup_tailscale() {
+  local tailnet_hostname="" tailscale_auth_key="$AUTH_KEY"
+
+  set_hostname tailnet_hostname || return 1
+  [[ -n $tailnet_hostname ]] || return 1
+
+  if [[ -z $tailscale_auth_key ]] && tailscale status &>/dev/null; then
+    echo "Renaming Tailscale node to $tailnet_hostname..."
+    sudo -n tailscale set --hostname="$tailnet_hostname" || return 1
+    echo "✓ Tailscale ($tailnet_hostname)"
+    echo
+    return 0
+  fi
+
+  if [[ -z $tailscale_auth_key ]] && has_saved_state; then
+    echo "Bringing up Tailscale as $tailnet_hostname..."
+    sudo -n tailscale up --ssh --accept-routes --hostname="$tailnet_hostname" || return 1
+    echo "✓ Tailscale ($tailnet_hostname)"
+    echo
+    return 0
+  fi
+
+  [[ -n $tailscale_auth_key ]] || prompt_auth_key tailscale_auth_key "$tailnet_hostname" || return 1
 
   echo
   echo "Bringing up Tailscale..."
-  tailscale_up --ssh --accept-routes --hostname="$tailnet_hostname" --auth-key="$tailscale_auth_key" || return 1
+  sudo -n tailscale up --ssh --accept-routes --hostname="$tailnet_hostname" --auth-key="$tailscale_auth_key" || return 1
 
   echo "✓ Tailscale"
   echo
