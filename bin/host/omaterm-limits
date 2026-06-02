@@ -9,8 +9,8 @@
 # Omaterms pin to the same cores). A lone Omaterm still gets every non-reserved
 # core; the set is re-divided as Omaterms come and go. Memory is hard-partitioned
 # evenly by Omaterm count. When there are more Omaterms than cores to divide,
-# cpuset partitioning is skipped and cpu-shares provides fair sharing instead.
-# Set OMATERM_NO_LIMITS=1 to opt out entirely.
+# every Omaterm is pinned to the full non-reserved range and cpu-shares provides
+# fair sharing instead. Set OMATERM_NO_LIMITS=1 to opt out entirely.
 HOST_RESERVE_CORES="${OMATERM_HOST_RESERVE_CORES:-1}"
 HOST_RESERVE_RAM_MB="${OMATERM_HOST_RESERVE_RAM_MB:-2048}"
 CPU_SHARES="${OMATERM_CPU_SHARES:-1024}"
@@ -30,16 +30,23 @@ host_total_ram_mb() {
 
 # Contiguous CPU slice for Omaterm `index` (0-based) out of `count`, reserving
 # the first HOST_RESERVE_CORES cores for the host and splitting the rest evenly
-# (earlier Omaterms absorb any remainder). Fails (prints nothing) when there
-# aren't enough cores to give every Omaterm at least one — callers then fall
-# back to a shared cpuset via cpu-shares.
+# (earlier Omaterms absorb any remainder). When there are more Omaterms than
+# cores to divide, every Omaterm gets the full non-reserved range instead and
+# cpu-shares arbitrates — always a real range, never nothing, so a rebalance
+# overwrites any prior pin rather than leaving a stale narrow one. Fails (prints
+# nothing) only when there are no non-reserved cores at all.
 omaterm_cpuset() {
   local index="$1" count="$2" cores avail base rem start size
   cores="$(host_core_count)"
   avail=$((cores - HOST_RESERVE_CORES))
 
-  if ((count < 1 || avail < count)); then
+  if ((count < 1 || avail < 1)); then
     return 1
+  fi
+
+  if ((avail < count)); then
+    printf '%d-%d' "$HOST_RESERVE_CORES" "$((cores - 1))"
+    return
   fi
 
   base=$((avail / count))
