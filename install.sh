@@ -86,7 +86,7 @@ install_gum() {
   fi
 
   echo
-  echo "✓ gum"
+  echo "✓ Gum"
 }
 
 install_omaterm_command() {
