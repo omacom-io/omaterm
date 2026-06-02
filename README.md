@@ -88,7 +88,7 @@ The named container persists its filesystem across starts, including home direct
 So several Omaterms can share one machine without starving the host or each other, every Omaterm is launched with CPU and memory limits, re-divided automatically whenever one is created or removed:
 
 - **Host reserve**: one core and 2 GB of RAM are kept for the host so it stays responsive under load.
-- **CPU (shared)**: all Omaterms are pinned to the remaining cores with equal `cpu-shares`. A lone Omaterm gets every non-reserved core; when several run at once the kernel splits them fairly, and rebalances live as runs finish.
+- **CPU (partitioned)**: the remaining cores are split into disjoint, contiguous sets — one per Omaterm — so workers in different Omaterms never land on the same cores. A lone Omaterm gets every non-reserved core; the sets are re-divided as Omaterms come and go. When there are more Omaterms than cores to divide, every Omaterm is pinned to the full non-reserved range instead and `cpu-shares` arbitrates.
 - **Memory (partitioned)**: the remaining RAM is hard-split evenly across all Omaterms (`(TOTAL_RAM - 2 GB) / count`), with swap disabled, so one Omaterm can't drag the whole machine into swap or OOM the others.
 
 Tune or disable the limits with environment variables:
@@ -99,5 +99,7 @@ OMATERM_HOST_RESERVE_RAM_MB=4096 omaterm new ci  # reserve 4 GB for the host
 OMATERM_CPU_SHARES=512 omaterm new ci         # give this layout a different weight
 OMATERM_NO_LIMITS=1 omaterm new ci            # opt out of limits entirely
 ```
+
+Exempt a single Omaterm entirely with `omaterm new NAME --no-limits` (`-n`): it runs uncapped and is left out of every division and rebalance, so the other Omaterms keep dividing the host among just themselves.
 
 CPU and memory limits set this way can also be adjusted on a running Omaterm with `docker update`; environment variables baked into a container cannot.

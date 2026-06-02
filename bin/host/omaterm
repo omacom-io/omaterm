@@ -4,6 +4,9 @@ set -euo pipefail
 IMAGE="${OMATERM_IMAGE:-ghcr.io/omacom-io/omaterm}"
 DEFAULT_NAME="omaterm"
 LABEL="omaterm=1"
+# Marks an Omaterm that opted out of resource limits: it runs uncapped and is
+# excluded from every division and rebalance.
+NOLIMITS_LABEL="omaterm.nolimits=1"
 SETUP_DONE_MARKER="/home/omaterm/.local/state/omaterm/setup-done"
 TAILSCALE_STATE_FILE="/var/lib/tailscale/tailscaled.state"
 TAILSCALE_HOSTNAME_FILE="/home/omaterm/.local/state/omaterm/tailscale-hostname"
@@ -20,7 +23,7 @@ usage() {
   cat >&2 <<'EOF'
 Usage:
   omaterm
-  omaterm new NAME [-t|--template TEMPLATE] [-d|--docker-access]
+  omaterm new NAME [-t|--template TEMPLATE] [-d|--docker-access] [-n|--no-limits]
     [--op ITEM]
     [--git-name NAME] [--git-email EMAIL] [--gh-token TOKEN]
     [--ts-token TOKEN] [--ts-host HOSTNAME] [--op-token TOKEN]
@@ -47,6 +50,16 @@ validate_name() {
 
 omaterm_names() {
   docker container ls -a --filter "label=$LABEL" --format '{{.Names}}' | sort -u
+}
+
+# Omaterms tagged to sit out the limits game.
+omaterm_nolimits_names() {
+  docker container ls -a --filter "label=$LABEL" --filter "label=$NOLIMITS_LABEL" --format '{{.Names}}' | sort -u
+}
+
+# Omaterms that take part in resource division — every Omaterm minus the opt-outs.
+omaterm_limited_names() {
+  comm -23 <(omaterm_names) <(omaterm_nolimits_names)
 }
 
 container_exists() {
@@ -107,10 +120,10 @@ host_ts_hostname() {
 }
 
 run_new() {
-  local name="" template="" tailscale_host="" mount_docker=0
+  local name="" template="" tailscale_host="" mount_docker=0 no_limits=0
   local setup_op="" overrides=0 image reset_cmd
   local git_name="" git_email="" gh_token="" ts_token="" op_token="" ssh_key=""
-  local docker_args=() env_args=() name_args=() all=() new_index=0 i
+  local docker_args=() env_args=() name_args=() label_args=() limited=() all=() new_index=0 i
 
   while (($#)); do
     case "$1" in
@@ -124,6 +137,7 @@ run_new() {
       --op-token)           op_token="${2:-}"; overrides=1; shift 2 ;;
       --ssh-key)            ssh_key="${2:-}"; overrides=1; shift 2 ;;
       -d | --docker-access) mount_docker=1; shift ;;
+      -n | --no-limits)     no_limits=1; shift ;;
       -*)                   usage; exit 2 ;;
       *)                    name="$1"; shift ;;
     esac
@@ -173,17 +187,29 @@ run_new() {
   fi
 
   name_args=(--name "$name")
+  label_args=(--label "$LABEL")
 
-  # Adding this Omaterm re-slices CPU and shrinks every Omaterm's memory share.
-  # Build the full ordered set (existing Omaterms plus this one), re-divide the
-  # existing ones, then claim this Omaterm's own slice by its position in the set.
-  mapfile -t all < <(omaterm_names; echo "$name")
-  mapfile -t all < <(printf '%s\n' "${all[@]}" | sort -u)
-  for i in "${!all[@]}"; do
-    [[ ${all[i]} == "$name" ]] && new_index="$i"
-  done
-  rebalance_limits "${all[@]}"
-  build_limit_args "${#all[@]}" "$new_index"
+  if (( no_limits )); then
+    # Opt out of the limits game: run uncapped, tag the container so future
+    # rebalances skip it, and re-divide only the existing limited Omaterms (this
+    # one doesn't change their share). rebalance leaves LIMIT_ARGS set for the
+    # last box it touched, so clear it before this Omaterm's own launch.
+    label_args+=(--label "$NOLIMITS_LABEL")
+    mapfile -t limited < <(omaterm_limited_names)
+    rebalance_limits "${limited[@]}"
+    LIMIT_ARGS=()
+  else
+    # Adding this Omaterm re-slices CPU and shrinks every limited Omaterm's
+    # memory share. Build the limited set plus this one, re-divide the existing
+    # ones, then claim this Omaterm's own slice by its position in the set.
+    mapfile -t all < <(omaterm_limited_names; echo "$name")
+    mapfile -t all < <(printf '%s\n' "${all[@]}" | sort -u)
+    for i in "${!all[@]}"; do
+      [[ ${all[i]} == "$name" ]] && new_index="$i"
+    done
+    rebalance_limits "${all[@]}"
+    build_limit_args "${#all[@]}" "$new_index"
+  fi
 
   if [ -t 0 ] && [ -r /dev/tty ]; then
     exec </dev/tty
@@ -214,7 +240,7 @@ run_new() {
 
     exec docker run -it "${env_args[@]}" \
       "${name_args[@]}" \
-      --label "$LABEL" \
+      "${label_args[@]}" \
       --net host \
       "${LIMIT_ARGS[@]}" \
       "${docker_args[@]}" \
@@ -233,7 +259,7 @@ run_new() {
 
   exec docker run -it "${env_args[@]}" \
     "${name_args[@]}" \
-    --label "$LABEL" \
+    "${label_args[@]}" \
     --net host \
     "${LIMIT_ARGS[@]}" \
     "${docker_args[@]}" \
@@ -251,7 +277,7 @@ connect_omaterm() {
 }
 
 run_connect() {
-  local name="${1:-}" names
+  local name="${1:-}" names limited
 
   if [[ -n $name ]]; then
     validate_name "$name"
@@ -260,8 +286,8 @@ run_connect() {
       exit 1
     }
 
-    mapfile -t names < <(omaterm_names)
-    rebalance_limits "${names[@]}"
+    mapfile -t limited < <(omaterm_limited_names)
+    rebalance_limits "${limited[@]}"
     connect_omaterm "$name"
   fi
 
@@ -273,7 +299,8 @@ run_connect() {
 
   name="$(choose_omaterm "Start" "${names[@]}")"
 
-  rebalance_limits "${names[@]}"
+  mapfile -t limited < <(omaterm_limited_names)
+  rebalance_limits "${limited[@]}"
 
   connect_omaterm "$name"
 }
@@ -391,7 +418,7 @@ run_rm() {
   prune_dangling_images
 
   # One fewer Omaterm means a larger CPU slice and memory share for the rest.
-  mapfile -t names < <(omaterm_names)
+  mapfile -t names < <(omaterm_limited_names)
   rebalance_limits "${names[@]}"
 }
 

@@ -42,8 +42,17 @@ container_running() {
 }
 
 if [[ ${1:-} == "container" && ${2:-} == "ls" ]]; then
-  while IFS=: read -r name running label; do
-    [[ -n $name && $label == "1" ]] && printf '%s\n' "$name"
+  # TEST_CONTAINERS rows are name:running:label[:nolimits]. A request that
+  # filters on the nolimits label lists only the tagged opt-outs.
+  want_nolimits=0
+  [[ "$*" == *omaterm.nolimits* ]] && want_nolimits=1
+  while IFS=: read -r name running label nolimits; do
+    [[ -n $name && $label == "1" ]] || continue
+    if ((want_nolimits)); then
+      [[ $nolimits == "1" ]] && printf '%s\n' "$name"
+    else
+      printf '%s\n' "$name"
+    fi
   done <"$TEST_CONTAINERS"
   exit 0
 fi
@@ -476,6 +485,50 @@ test_reserve_overrides() {
   pass "reserve overrides"
 }
 
+test_oversubscribed_shares_full_cpuset() {
+  new_env
+  write_docker
+  printf 'omaterm:false:1\nomaterm2:false:1\n' >"$TEST_CONTAINERS"
+
+  # 3 Omaterms but only 2 non-reserved cores: no per-box slice fits, so every
+  # Omaterm is pinned to the full range 1-2 (not left unpinned) and cpu-shares
+  # arbitrates. The full pin is reapplied on rebalance, overwriting any prior
+  # narrow slice. (65536 - 2048) / 3 = 21162 MB each.
+  OMATERM_TOTAL_CORES=3 run_omaterm new omaterm3
+
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name omaterm3 --label omaterm=1 --net host --cpuset-cpus 1-2 --cpu-shares 1024 --memory 21162m --memory-swap 21162m omaterm:test" "oversubscribed new pins to the full non-reserved range"
+  assert_file_contains "$TEST_TMP/docker-actions" "update --cpuset-cpus 1-2 --cpu-shares 1024 --memory 21162m --memory-swap 21162m omaterm" "oversubscribed rebalance re-pins existing to the full range"
+  pass "oversubscribed shares full cpuset"
+}
+
+test_new_no_limits_runs_uncapped() {
+  new_env
+  write_docker
+
+  run_omaterm new sandbox --no-limits
+
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name sandbox --label omaterm=1 --label omaterm.nolimits=1 --net host omaterm:test" "no-limits new runs uncapped and is tagged"
+  assert_file_not_contains "$TEST_TMP/docker-actions" "--cpuset-cpus" "no-limits new sets no cpuset"
+  assert_file_not_contains "$TEST_TMP/docker-actions" "--memory" "no-limits new sets no memory cap"
+  pass "new --no-limits runs uncapped"
+}
+
+test_no_limits_box_excluded_from_rebalance() {
+  new_env
+  write_docker
+  # An existing limited box and an existing no-limits box (4th field = nolimits).
+  printf 'omaterm:false:1\nsandbox:false:1:1\n' >"$TEST_CONTAINERS"
+
+  run_omaterm new omaterm2
+
+  # Only the two limited boxes divide resources → 1-10, 11-19 and
+  # (65536 - 2048) / 2 = 31744 MB. The no-limits box is never touched.
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name omaterm2 --label omaterm=1 --net host --cpuset-cpus 11-19 --cpu-shares 1024 --memory 31744m --memory-swap 31744m omaterm:test" "limited new divides only among limited boxes"
+  assert_file_contains "$TEST_TMP/docker-actions" "update --cpuset-cpus 1-10 --cpu-shares 1024 --memory 31744m --memory-swap 31744m omaterm" "existing limited box is re-sliced for two"
+  assert_file_not_contains "$TEST_TMP/docker-actions" "sandbox" "no-limits box is never rebalanced"
+  pass "no-limits box excluded from rebalance"
+}
+
 test_template_create_commits_source() {
   new_env
   write_docker
@@ -668,6 +721,9 @@ main() {
   test_rm_rebalances_remaining
   test_no_limits_opts_out
   test_reserve_overrides
+  test_oversubscribed_shares_full_cpuset
+  test_new_no_limits_runs_uncapped
+  test_no_limits_box_excluded_from_rebalance
   test_template_create_commits_source
   test_template_create_requires_from
   test_template_create_unknown_source_fails
