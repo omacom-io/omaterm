@@ -61,6 +61,8 @@ omaterm connect omaterm2
 omaterm new omaterm2
 omaterm new omaterm2 -d # Mount the host Docker engine
 omaterm new omaterm2 --docker-access # Long form of -d
+omaterm new omaterm3 --clone omaterm2 # Snapshot an existing Omaterm into a new one
+omaterm new omaterm3 -c omaterm2 --git-email me@example.com # Clone, overriding setup
 omaterm new hand --docker-access --prepare 'mkdir -p Work/basecamp && cd Work/basecamp && gh repo clone basecamp/bc3 && cd bc3 && setup --reset'
 omaterm exec omaterm2 -w /home/omaterm/Work/project 'docker ps'
 omaterm ls
