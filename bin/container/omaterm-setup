@@ -160,8 +160,7 @@ finish_setup() {
   fi
 }
 
+# Run setup
 banner
-
 setup_unattended || setup_interactively
-
 finish_setup
