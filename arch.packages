@@ -5,6 +5,7 @@ docker
 docker-buildx
 docker-compose
 eza
+fd
 fzf
 git
 github-cli
