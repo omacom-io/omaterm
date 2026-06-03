@@ -38,22 +38,21 @@ if grep -qE 'install-native|install-docker|Install natively|run_installer' "$INS
   fail "installer should not delegate to another installer"
 fi
 
-if grep -qF 'exec "$HOME/.local/bin/omaterm"' "$INSTALL" || grep -qF 'exec newgrp docker' "$INSTALL"; then
-  fail "installer should not launch omaterm after install"
-fi
-
 grep -qF 'sudo groupadd -f docker' "$INSTALL" ||
   fail "installer should create the docker group"
 
-grep -qF 'sudo usermod -aG docker "${USER:-$(id -un)}"' "$INSTALL" ||
+grep -qF 'sudo usermod -aG docker "$target_user"' "$INSTALL" ||
   fail "installer should add the user to the docker group"
+
+grep -qF 'exec sg docker -c omaterm' "$INSTALL" ||
+  fail "installer should start omaterm from the docker group"
 
 if grep -qF 'newgrp docker' "$INSTALL"; then
   fail "installer should rely on omaterm group handling instead of newgrp guidance"
 fi
 
-grep -qF 'Run omaterm to get started' "$INSTALL" ||
-  fail "installer should tell the user how to start omaterm"
+grep -qF 'Starting omaterm...' "$INSTALL" ||
+  fail "installer should start omaterm after install"
 
 grep -qF 'install_gum' "$INSTALL" ||
   fail "installer should install gum"

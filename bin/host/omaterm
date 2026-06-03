@@ -78,20 +78,15 @@ container_detached() {
 
 # The docker socket is group-owned by `docker`. After the installer adds the
 # user to that group, shells started earlier still lack the GID until they
-# re-login, so docker calls fail with a permission error. If the user is a
-# member per /etc/group but this process didn't inherit the GID, re-exec under
-# the group with sg so omaterm works without a logout. The GID check is the
-# fast path: when it's already present (the normal case) we return immediately
-# without touching docker.
+# re-login. If this process doesn't have the GID yet, run the requested omaterm
+# command in a docker-group shell.
 ensure_docker_group() {
   local docker_gid
+
   docker_gid="$(getent group docker | cut -d: -f3)"
 
   [[ -n $docker_gid ]] || return 0
-  id -G | grep -qw "$docker_gid" && return 0   # already have it: nothing to do
-  id -nG | grep -qw docker || return 0         # not a member: can't fix it here
-  command -v sg >/dev/null 2>&1 || return 0    # no sg: fall through to the real error
-  docker info >/dev/null 2>&1 && return 0      # reachable anyway: don't re-exec
+  id -G | grep -qw "$docker_gid" && return 0
 
   exec sg docker -c "$(printf '%q ' "$0" "$@")"
 }

@@ -91,6 +91,11 @@ if [[ ${1:-} == "image" && ${2:-} == "ls" ]]; then
   exit 0
 fi
 
+if [[ ${1:-} == "info" && ${TEST_DOCKER_INFO_FAIL:-0} == "1" && ${TEST_IN_SG:-0} != "1" ]]; then
+  echo "permission denied while trying to connect to the docker API at unix:///var/run/docker.sock" >&2
+  exit 1
+fi
+
 # Record the action, then reconcile container/image state so later reads reflect it.
 printf '%s\n' "$*" >>"$TEST_TMP/docker-actions"
 
@@ -162,6 +167,45 @@ SH
   chmod +x "$TEST_BIN/op"
 }
 
+write_fresh_docker_group_membership() {
+  cat >"$TEST_BIN/id" <<'SH'
+#!/usr/bin/env bash
+case "${1:-}" in
+  -G)
+    if [[ ${TEST_IN_SG:-0} == "1" ]]; then
+      printf '1000 999\n'
+    else
+      printf '1000\n'
+    fi
+    ;;
+  -nG) printf 'dhh\n' ;;
+  -un) printf 'dhh\n' ;;
+  *)   /usr/bin/id "$@" ;;
+esac
+SH
+  chmod +x "$TEST_BIN/id"
+
+  cat >"$TEST_BIN/getent" <<'SH'
+#!/usr/bin/env bash
+if [[ ${1:-} == "group" && ${2:-} == "docker" ]]; then
+  printf 'docker:x:999:dhh\n'
+elif [[ ${1:-} == "passwd" && ${2:-} == "dhh" ]]; then
+  printf 'dhh:x:1000:1000:DHH:/home/dhh:/bin/bash\n'
+else
+  /usr/bin/getent "$@"
+fi
+SH
+  chmod +x "$TEST_BIN/getent"
+
+cat >"$TEST_BIN/sg" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TMP/sg-calls"
+[[ ${1:-} == "docker" && ${2:-} == "-c" ]] || exit 1
+TEST_IN_SG=1 bash -c "${3:-}"
+SH
+  chmod +x "$TEST_BIN/sg"
+}
+
 run_omaterm() {
   PATH="$TEST_BIN:$PATH" OMATERM_IMAGE="omaterm:test" \
     OMATERM_TOTAL_CORES="${OMATERM_TOTAL_CORES:-20}" \
@@ -187,6 +231,19 @@ test_help_lists_commands() {
   assert_file_contains "$TEST_TMP/output" "omaterm connect [NAME]" "help lists connect"
   assert_file_contains "$TEST_TMP/output" "omaterm exec NAME [-w|--workdir DIR] COMMAND..." "help lists exec workdir"
   pass "help lists commands"
+}
+
+test_fresh_docker_group_runs_with_sg() {
+  new_env
+  write_docker
+  write_fresh_docker_group_membership
+
+  run_omaterm new bokka-bc3 -d
+
+  assert_file_contains "$TEST_TMP/sg-calls" "docker -c" "fresh docker group membership runs through sg"
+  assert_file_contains "$TEST_TMP/sg-calls" "new bokka-bc3 -d" "sg re-exec preserves omaterm arguments"
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name bokka-bc3" "re-exec runs the requested omaterm command"
+  pass "fresh docker group membership runs immediately"
 }
 
 test_default_creates_omaterm() {
@@ -753,6 +810,7 @@ test_new_template_ts_token_defaults_hostname() {
 
 main() {
   test_help_lists_commands
+  test_fresh_docker_group_runs_with_sg
   test_default_creates_omaterm
   test_new_with_setup_seed_args
   test_new_with_op_setup_seed

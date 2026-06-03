@@ -26,6 +26,8 @@ is_wsl() {
 }
 
 install_docker() {
+  local target_user
+
   section "Installing Docker..."
 
   if is_wsl; then
@@ -56,7 +58,8 @@ install_docker() {
   section "Enabling Docker..."
   sudo systemctl enable --now docker.service
   sudo groupadd -f docker
-  sudo usermod -aG docker "${USER:-$(id -un)}"
+  target_user="${SUDO_USER:-${USER:-$(id -un)}}"
+  sudo usermod -aG docker "$target_user"
 
   echo
   echo "✓ Docker"
@@ -120,4 +123,9 @@ install_gum
 install_omaterm_command
 
 echo
-echo "Run omaterm to get started"
+echo "Starting omaterm..."
+if is_wsl; then
+  exec omaterm
+else
+  exec sg docker -c omaterm
+fi
