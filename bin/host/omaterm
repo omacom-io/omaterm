@@ -24,6 +24,7 @@ usage() {
 Usage:
   omaterm
   omaterm new NAME [-t|--template TEMPLATE] [-d|--docker-access] [-n|--no-limits]
+    [--detach]
     [--op ITEM]
     [--git-name NAME] [--git-email EMAIL] [--gh-token TOKEN]
     [--ts-token TOKEN] [--ts-host HOSTNAME] [--op-token TOKEN]
@@ -68,6 +69,11 @@ container_exists() {
 
 container_running() {
   [[ "$(docker inspect -f '{{.State.Running}}' "$1")" == "true" ]]
+}
+
+container_detached() {
+  docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$1" 2>/dev/null |
+    grep -qxF 'OMATERM_DETACH=1'
 }
 
 # The docker socket is group-owned by `docker`. After the installer adds the
@@ -120,8 +126,8 @@ host_ts_hostname() {
 }
 
 run_new() {
-  local name="" template="" tailscale_host="" mount_docker=0 no_limits=0
-  local setup_op="" overrides=0 image reset_cmd
+  local name="" template="" tailscale_host="" mount_docker=0 no_limits=0 detach=0
+  local setup_op="" overrides=0 image reset_cmd run_mode detach_env
   local git_name="" git_email="" gh_token="" ts_token="" op_token="" ssh_key=""
   local docker_args=() env_args=() name_args=() label_args=() limited=() all=() new_index=0 i
 
@@ -138,6 +144,7 @@ run_new() {
       --ssh-key)            ssh_key="${2:-}"; overrides=1; shift 2 ;;
       -d | --docker-access) mount_docker=1; shift ;;
       -n | --no-limits)     no_limits=1; shift ;;
+      --detach)             detach=1; shift ;;
       -*)                   usage; exit 2 ;;
       *)                    name="$1"; shift ;;
     esac
@@ -211,7 +218,19 @@ run_new() {
     build_limit_args "${#all[@]}" "$new_index"
   fi
 
-  if [ -t 0 ] && [ -r /dev/tty ]; then
+  # Attached boxes run interactively (-it) and hold the container open with a
+  # login shell. A detached box (-d) has no terminal to attach to, so it idles
+  # as PID 1 (OMATERM_DETACH, honored by the entrypoint) and is driven entirely
+  # through `omaterm exec`. omaterm itself stays generic: it just makes a box
+  # that stays up — what runs inside is the caller's business.
+  run_mode=(-it)
+  detach_env=()
+  if (( detach )); then
+    run_mode=(-d)
+    detach_env=(-e OMATERM_DETACH=1)
+  fi
+
+  if (( ! detach )) && [ -t 0 ] && [ -r /dev/tty ]; then
     exec </dev/tty
   fi
 
@@ -238,7 +257,7 @@ run_new() {
 
     reset_cmd="rm -f $TAILSCALE_STATE_FILE $TAILSCALE_HOSTNAME_FILE $SETUP_DONE_MARKER; "
 
-    exec docker run -it "${env_args[@]}" \
+    exec docker run "${run_mode[@]}" "${detach_env[@]}" "${env_args[@]}" \
       "${name_args[@]}" \
       "${label_args[@]}" \
       --net host \
@@ -257,7 +276,7 @@ run_new() {
   [[ -n $op_token ]] && env_args+=(-e "OMATERM_SETUP_OP_TOKEN=$op_token")
   [[ -n $ssh_key ]] && env_args+=(-e "OMATERM_SETUP_SSH_KEY=$ssh_key")
 
-  exec docker run -it "${env_args[@]}" \
+  exec docker run "${run_mode[@]}" "${detach_env[@]}" "${env_args[@]}" \
     "${name_args[@]}" \
     "${label_args[@]}" \
     --net host \
@@ -268,6 +287,11 @@ run_new() {
 
 connect_omaterm() {
   local name="$1"
+
+  if container_detached "$name"; then
+    container_running "$name" || docker start "$name" >/dev/null
+    exec docker exec -it "$name" bash -l
+  fi
 
   if container_running "$name"; then
     exec docker attach "$name"

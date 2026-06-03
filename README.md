@@ -61,6 +61,7 @@ omaterm connect omaterm2
 omaterm new omaterm2
 omaterm new omaterm2 -d # Mount the host Docker engine
 omaterm new omaterm2 --docker-access # Long form of -d
+omaterm new worker1 --detach # Start headless: no terminal, idles for `omaterm exec`
 omaterm exec omaterm2 -w /home/omaterm/Work/project 'docker ps'
 omaterm ls
 omaterm rm omaterm2
@@ -80,6 +81,8 @@ omaterm template rm ruby                     # Remove a template
 `template create` pays the cost of snapshotting the box once; each `new --template` after that is a near-instant copy-on-write copy. Every box stamped from a template registers a fresh Tailscale node rather than fighting the source over one identity, while baked-in tools, packages, and git config carry over.
 
 When you pass `--ts-token` without `--ts-host`, the Tailscale hostname defaults to `<host>-<name>` — e.g. creating `bokka-bc3` on host `dhh-fd` registers as `dhh-fd-bokka-bc3`. Pass `--ts-host` to choose a name explicitly.
+
+A normal Omaterm runs interactively and is held open by its login shell. Pass `--detach` to start one headless instead: it has no terminal attached and idles as PID 1, so it stays up for `omaterm exec`, supervisors, or a later `omaterm connect`, which opens a fresh login shell inside the running box.
 
 The named container persists its filesystem across starts, including home directory state, installed packages, git config, shell history, and projects. Remove the Omaterm container with `docker rm omaterm` when you want to reset its shell environment. Omaterm uses host networking so services published to host localhost by containers are reachable from inside Omaterm. Use `omaterm new NAME -d` or `omaterm new NAME --docker-access` to mount the host Docker engine through `/var/run/docker.sock`.
 

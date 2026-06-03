@@ -63,4 +63,14 @@ grep -qF 'OMATERM_SETUP_GIT_NAME' "$ENTRYPOINT" ||
 grep -qF 'OMATERM_SETUP_TS_HOST' "$ENTRYPOINT" ||
   fail "entrypoint should forward seeded Tailscale hostname"
 
+grep -qF 'if [ -n "${OMATERM_DETACH:-}" ]; then' "$ENTRYPOINT" ||
+  fail "entrypoint should branch on OMATERM_DETACH for detached boxes"
+
+grep -qF 'exec runuser -u omaterm -- env "${OMATERM_ENV[@]}" sleep infinity' "$ENTRYPOINT" ||
+  fail "detached entrypoint should idle as PID 1 instead of a login shell"
+
+detach_line="$(grep -nF 'OMATERM_DETACH:-' "$ENTRYPOINT" | head -n1 | cut -d: -f1)"
+[[ -n $detach_line && -n $setup_line ]] && (( setup_line < detach_line )) ||
+  fail "entrypoint should run setup before the detached idle"
+
 pass "entrypoint tailscale and shell handoff contracts"

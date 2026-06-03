@@ -24,16 +24,16 @@ write_docker() {
 set -euo pipefail
 
 container_exists() {
-  local wanted="$1" name running label
-  while IFS=: read -r name running label; do
+  local wanted="$1" name running label nolimits detached
+  while IFS=: read -r name running label nolimits detached; do
     [[ $name == "$wanted" ]] && return 0
   done <"$TEST_CONTAINERS"
   return 1
 }
 
 container_running() {
-  local wanted="$1" name running label
-  while IFS=: read -r name running label; do
+  local wanted="$1" name running label nolimits detached
+  while IFS=: read -r name running label nolimits detached; do
     if [[ $name == "$wanted" ]]; then
       [[ $running == "true" ]] && return 0 || return 1
     fi
@@ -62,10 +62,19 @@ if [[ ${1:-} == "container" && ${2:-} == "inspect" ]]; then
 fi
 
 if [[ ${1:-} == "inspect" && ${2:-} == "-f" ]]; then
-  if container_running "${4:-}"; then
-    echo true
-  else
-    echo false
+  if [[ ${3:-} == *".State.Running"* ]]; then
+    if container_running "${4:-}"; then
+      echo true
+    else
+      echo false
+    fi
+  elif [[ ${3:-} == *".Config.Env"* ]]; then
+    while IFS=: read -r name running label nolimits detached; do
+      if [[ $name == "${4:-}" && $detached == "1" ]]; then
+        echo "OMATERM_DETACH=1"
+        break
+      fi
+    done <"$TEST_CONTAINERS"
   fi
   exit 0
 fi
@@ -310,6 +319,31 @@ test_connect_named_attaches_running() {
   pass "connect named attaches running"
 }
 
+test_connect_running_detached_opens_bash() {
+  new_env
+  write_docker
+  printf 'worker:true:1::1\n' >"$TEST_CONTAINERS"
+
+  run_omaterm connect worker
+
+  assert_file_contains "$TEST_TMP/docker-actions" "exec -it worker bash -l" "connect opens bash in running detached omaterm"
+  assert_file_not_contains "$TEST_TMP/docker-actions" "attach worker" "connect does not attach to detached pid 1"
+  pass "connect running detached opens bash"
+}
+
+test_connect_stopped_detached_starts_then_opens_bash() {
+  new_env
+  write_docker
+  printf 'worker:false:1::1\n' >"$TEST_CONTAINERS"
+
+  run_omaterm connect worker
+
+  assert_file_contains "$TEST_TMP/docker-actions" "start worker" "connect starts stopped detached omaterm"
+  assert_file_contains "$TEST_TMP/docker-actions" "exec -it worker bash -l" "connect opens bash after starting detached omaterm"
+  assert_file_not_contains "$TEST_TMP/docker-actions" "start -ai worker" "connect does not attach to detached pid 1"
+  pass "connect stopped detached starts then opens bash"
+}
+
 test_connect_without_name_starts_existing() {
   new_env
   write_docker
@@ -513,6 +547,29 @@ test_new_no_limits_runs_uncapped() {
   pass "new --no-limits runs uncapped"
 }
 
+test_new_detach_runs_detached() {
+  new_env
+  write_docker
+
+  run_omaterm new worker --detach --no-limits
+
+  assert_file_contains "$TEST_TMP/docker-actions" "run -d -e OMATERM_DETACH=1 --name worker --label omaterm=1 --label omaterm.nolimits=1 --net host omaterm:test" "detach runs with -d and signals the entrypoint to idle"
+  assert_file_not_contains "$TEST_TMP/docker-actions" "run -it" "detach does not allocate an interactive terminal"
+  pass "new --detach runs detached"
+}
+
+test_new_detach_from_template() {
+  new_env
+  write_docker
+  printf 'omaterm-template:ruby\n' >"$TEST_IMAGES"
+
+  run_omaterm new worker --template ruby --detach --no-limits
+
+  assert_file_contains "$TEST_TMP/docker-actions" "run -d -e OMATERM_DETACH=1 -e OMATERM_SETUP_TS_HOST=" "detach from template runs with -d and the detach signal"
+  assert_file_not_contains "$TEST_TMP/docker-actions" "run -it" "detach from template does not allocate a terminal"
+  pass "new --detach from template runs detached"
+}
+
 test_no_limits_box_excluded_from_rebalance() {
   new_env
   write_docker
@@ -707,6 +764,8 @@ main() {
   test_default_attaches_running
   test_connect_named_starts_existing
   test_connect_named_attaches_running
+  test_connect_running_detached_opens_bash
+  test_connect_stopped_detached_starts_then_opens_bash
   test_connect_without_name_starts_existing
   test_multiple_uses_gum_choice
   test_ls_lists_omaterms
@@ -723,6 +782,8 @@ main() {
   test_reserve_overrides
   test_oversubscribed_shares_full_cpuset
   test_new_no_limits_runs_uncapped
+  test_new_detach_runs_detached
+  test_new_detach_from_template
   test_no_limits_box_excluded_from_rebalance
   test_template_create_commits_source
   test_template_create_requires_from

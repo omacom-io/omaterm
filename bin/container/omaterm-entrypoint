@@ -66,4 +66,12 @@ done
 
 runuser -u omaterm -- env "${SETUP_ENV[@]}" /home/omaterm/.local/bin/omaterm-setup
 
+# A detached box (omaterm new --detach) has no terminal attached, so there is no
+# interactive login shell to keep the container alive — one would read EOF and
+# exit, taking the container with it. Idle as PID 1 instead and let the caller
+# drive the box with `omaterm exec`.
+if [ -n "${OMATERM_DETACH:-}" ]; then
+  exec runuser -u omaterm -- env "${OMATERM_ENV[@]}" sleep infinity
+fi
+
 exec runuser -u omaterm -- env "${OMATERM_ENV[@]}" bash -l "$@"
