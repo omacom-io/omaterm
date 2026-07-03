@@ -306,19 +306,16 @@ run_connect() {
       echo "No such Omaterm: $name" >&2
       exit 1
     }
+  else
+    mapfile -t names < <(omaterm_names)
 
-    mapfile -t limited < <(omaterm_limited_names)
-    rebalance_limits "${limited[@]}"
-    connect_omaterm "$name"
+    # run_new execs into docker run, so it never returns here.
+    if ((${#names[@]} == 0)); then
+      run_new "$DEFAULT_NAME" -d
+    fi
+
+    name="$(choose_omaterm "Start" "${names[@]}")"
   fi
-
-  mapfile -t names < <(omaterm_names)
-
-  if ((${#names[@]} == 0)); then
-    run_new "$DEFAULT_NAME" -d
-  fi
-
-  name="$(choose_omaterm "Start" "${names[@]}")"
 
   mapfile -t limited < <(omaterm_limited_names)
   rebalance_limits "${limited[@]}"
