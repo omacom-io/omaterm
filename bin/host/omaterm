@@ -231,7 +231,11 @@ run_new() {
     detach_env=(-e OMATERM_DETACH=1)
   fi
 
-  if (( ! detach )) && [ -t 0 ] && [ -r /dev/tty ]; then
+  # An attached box needs a real terminal on stdin — docker run -it refuses a
+  # pipe. When stdin isn't one (the curl|bash installer hands its pipe down),
+  # rebind to the controlling terminal. Probe by opening: -r passes even when
+  # there is no controlling terminal, and a failed exec redirect is fatal.
+  if (( ! detach )) && ! [ -t 0 ] && { : </dev/tty; } 2>/dev/null; then
     exec </dev/tty
   fi
 
