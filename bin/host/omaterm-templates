@@ -35,8 +35,8 @@ template_create() {
   echo "==> Creating template $name from $source..." >&2
   if ! commit_error="$(docker commit "$source" "$image" 2>&1 >/dev/null)"; then
     echo "Error: could not create template from $source: $commit_error" >&2
-    echo "Its base image is missing — likely re-pulled or rebuilt since $source was created." >&2
-    echo "Recreate $source from the current image, then make the template." >&2
+    echo "If its base image is missing (re-pulled or rebuilt since $source was created)," >&2
+    echo "recreate $source from the current image, then make the template." >&2
     exit 1
   fi
 
