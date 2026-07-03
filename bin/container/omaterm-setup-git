@@ -16,11 +16,11 @@ while (($#)); do
   case "$1" in
     --name)
       NAME="${2:-}"
-      shift 2
+      shift 2 || { usage; exit 2; }
       ;;
     --email)
       EMAIL="${2:-}"
-      shift 2
+      shift 2 || { usage; exit 2; }
       ;;
     *)
       usage

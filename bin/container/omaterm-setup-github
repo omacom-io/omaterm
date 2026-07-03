@@ -18,7 +18,7 @@ while (($#)); do
   case "$1" in
     --token)
       TOKEN="${2:-}"
-      shift 2
+      shift 2 || { usage; exit 2; }
       ;;
     *)
       usage

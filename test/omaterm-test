@@ -312,6 +312,17 @@ test_new_cli_seed_args_override_op() {
   pass "new cli seed args override op"
 }
 
+test_new_flag_missing_value_shows_usage() {
+  new_env
+  write_docker
+
+  run_omaterm new omaterm2 --gh-token || true
+
+  assert_file_contains "$TEST_TMP/output" "Usage:" "a flag missing its value prints usage instead of dying silently"
+  assert_file_not_contains "$TEST_TMP/docker-actions" "run" "a flag missing its value creates nothing"
+  pass "new flag missing value shows usage"
+}
+
 test_new_mounts_docker_with_d() {
   new_env
   write_docker
@@ -890,6 +901,7 @@ main() {
   test_new_with_op_setup_seed
   test_new_with_op_url_setup_seed
   test_new_cli_seed_args_override_op
+  test_new_flag_missing_value_shows_usage
   test_new_mounts_docker_with_d
   test_new_mounts_docker_with_long_flag
   test_default_starts_existing
