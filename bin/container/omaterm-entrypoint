@@ -34,8 +34,15 @@ ensure_host_docker_access() {
   local socket_gid
 
   socket_gid="$(stat -c '%g' "$HOST_DOCKER_SOCKET")"
-  groupmod -g "$socket_gid" docker
-  usermod -aG docker omaterm
+
+  # Aligning the docker group can fail — the socket may be owned by gid 0 or a
+  # gid another group already holds. That must not kill PID 1: join the owning
+  # group directly instead so the box still boots with sudoless docker access.
+  if groupmod -g "$socket_gid" docker 2>/dev/null; then
+    usermod -aG docker omaterm
+  else
+    usermod -aG "$socket_gid" omaterm || true
+  fi
 }
 
 ensure_host_docker_access
