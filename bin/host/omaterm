@@ -366,10 +366,6 @@ run_exec() {
     exit 1
   }
 
-  if [[ ${1:-} == "--" ]]; then
-    shift
-  fi
-
   while (($#)); do
     case "$1" in
       -w | --workdir)

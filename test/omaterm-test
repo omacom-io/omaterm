@@ -486,6 +486,17 @@ test_exec_uses_long_workdir() {
   pass "exec uses long workdir"
 }
 
+test_exec_double_dash_stops_flag_parsing() {
+  new_env
+  write_docker
+  printf 'omaterm:true:1\n' >"$TEST_CONTAINERS"
+
+  run_omaterm exec omaterm -- -w /somewhere pwd
+
+  assert_file_contains "$TEST_TMP/docker-actions" "exec omaterm bash -lc -w /somewhere pwd" "-- keeps the command intact instead of eating -w as workdir"
+  pass "exec -- stops flag parsing"
+}
+
 test_rm_default() {
   new_env
   write_docker
@@ -879,6 +890,7 @@ main() {
   test_exec_starts_stopped_container
   test_exec_uses_workdir
   test_exec_uses_long_workdir
+  test_exec_double_dash_stops_flag_parsing
   test_rm_default
   test_rm_named
   test_rm_refuses_unlabeled_container
