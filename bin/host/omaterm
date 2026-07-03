@@ -128,7 +128,7 @@ host_ts_hostname() {
 
 run_new() {
   local name="" template="" tailscale_host="" mount_docker=0 no_limits=0 detach=0
-  local setup_op="" image reset_cmd run_mode detach_env
+  local setup_op="" image run_mode detach_env pair var image_run
   local git_name="" git_email="" gh_token="" ts_token="" op_token="" ssh_key=""
   local docker_args=() env_args=() name_args=() label_args=() limited=() all=() new_index=0 i
 
@@ -243,43 +243,35 @@ run_new() {
     docker_args+=(-v /var/run/docker.sock:/var/run/docker.sock)
   fi
 
+  # A template image bakes in the source's setup env (tokens), so pass every
+  # setup var explicitly — empty unless overridden — to keep the baked-in
+  # values from silently re-applying. A fresh image only needs the values
+  # actually provided.
+  for pair in \
+    OMATERM_SETUP_TS_HOST:tailscale_host \
+    OMATERM_SETUP_GIT_NAME:git_name \
+    OMATERM_SETUP_GIT_EMAIL:git_email \
+    OMATERM_SETUP_GH_TOKEN:gh_token \
+    OMATERM_SETUP_TS_AUTH_KEY:ts_token \
+    OMATERM_SETUP_OP_TOKEN:op_token \
+    OMATERM_SETUP_SSH_KEY:ssh_key; do
+    var="${pair#*:}"
+
+    if [[ -n $template || -n ${!var} ]]; then
+      env_args+=(-e "${pair%%:*}=${!var}")
+    fi
+  done
+
+  image_run=("$image")
+
   if [[ -n $template ]]; then
-    # The template image bakes in the source's setup env (tokens) and Tailscale
-    # node identity. Pass every setup var explicitly — empty unless overridden —
-    # so the baked-in env can't silently re-apply. Always wipe the Tailscale
-    # state and clear the setup marker: every box stamped from a template is its
-    # own machine, so it must register a fresh Tailscale node (not fight the
-    # source over one identity) and re-run setup to apply its own --ts-host/token.
-    env_args=(
-      -e "OMATERM_SETUP_TS_HOST=$tailscale_host"
-      -e "OMATERM_SETUP_GIT_NAME=$git_name"
-      -e "OMATERM_SETUP_GIT_EMAIL=$git_email"
-      -e "OMATERM_SETUP_GH_TOKEN=$gh_token"
-      -e "OMATERM_SETUP_TS_AUTH_KEY=$ts_token"
-      -e "OMATERM_SETUP_OP_TOKEN=$op_token"
-      -e "OMATERM_SETUP_SSH_KEY=$ssh_key"
-    )
-
-    reset_cmd="rm -f $TAILSCALE_STATE_FILE $TAILSCALE_HOSTNAME_FILE $SETUP_DONE_MARKER; "
-
-    exec docker run "${run_mode[@]}" "${detach_env[@]}" "${env_args[@]}" \
-      "${name_args[@]}" \
-      "${label_args[@]}" \
-      --net host \
-      "${LIMIT_ARGS[@]}" \
-      "${docker_args[@]}" \
-      --entrypoint bash \
-      "$image" \
-      -c "${reset_cmd}exec /home/omaterm/.local/bin/omaterm-entrypoint"
+    # Every box stamped from a template is its own machine: wipe the Tailscale
+    # state and clear the setup marker so it registers a fresh Tailscale node
+    # (not fight the source over one identity) and re-runs setup to apply its
+    # own --ts-host/token.
+    image_run=(--entrypoint bash "$image"
+      -c "rm -f $TAILSCALE_STATE_FILE $TAILSCALE_HOSTNAME_FILE $SETUP_DONE_MARKER; exec /home/omaterm/.local/bin/omaterm-entrypoint")
   fi
-
-  [[ -n $tailscale_host ]] && env_args+=(-e "OMATERM_SETUP_TS_HOST=$tailscale_host")
-  [[ -n $git_name ]] && env_args+=(-e "OMATERM_SETUP_GIT_NAME=$git_name")
-  [[ -n $git_email ]] && env_args+=(-e "OMATERM_SETUP_GIT_EMAIL=$git_email")
-  [[ -n $gh_token ]] && env_args+=(-e "OMATERM_SETUP_GH_TOKEN=$gh_token")
-  [[ -n $ts_token ]] && env_args+=(-e "OMATERM_SETUP_TS_AUTH_KEY=$ts_token")
-  [[ -n $op_token ]] && env_args+=(-e "OMATERM_SETUP_OP_TOKEN=$op_token")
-  [[ -n $ssh_key ]] && env_args+=(-e "OMATERM_SETUP_SSH_KEY=$ssh_key")
 
   exec docker run "${run_mode[@]}" "${detach_env[@]}" "${env_args[@]}" \
     "${name_args[@]}" \
@@ -287,7 +279,7 @@ run_new() {
     --net host \
     "${LIMIT_ARGS[@]}" \
     "${docker_args[@]}" \
-    "$IMAGE"
+    "${image_run[@]}"
 }
 
 connect_omaterm() {
