@@ -47,7 +47,7 @@ op_item_json() {
 }
 
 load_setup_from_op() {
-  local op_ref="$1" item_json value loaded=0
+  local op_ref="$1" item_json pair field var value loaded=0
 
   require_command op
   require_command jq
@@ -57,20 +57,22 @@ load_setup_from_op() {
     exit 1
   }
 
-  value="$(op_item_field "$item_json" "git-name")"
-  if [[ -n $value && -z $git_name ]]; then git_name="$value"; loaded=1; fi
-  value="$(op_item_field "$item_json" "git-email")"
-  if [[ -n $value && -z $git_email ]]; then git_email="$value"; loaded=1; fi
-  value="$(op_item_field "$item_json" "gh-token")"
-  if [[ -n $value && -z $gh_token ]]; then gh_token="$value"; loaded=1; fi
-  value="$(op_item_field "$item_json" "ts-token")"
-  if [[ -n $value && -z $ts_token ]]; then ts_token="$value"; loaded=1; fi
-  value="$(op_item_field "$item_json" "ts-host")"
-  if [[ -n $value && -z $tailscale_host ]]; then tailscale_host="$value"; loaded=1; fi
-  value="$(op_item_field "$item_json" "op-token")"
-  if [[ -n $value && -z $op_token ]]; then op_token="$value"; loaded=1; fi
-  value="$(op_item_field "$item_json" "ssh-key")"
-  if [[ -n $value && -z $ssh_key ]]; then ssh_key="$value"; loaded=1; fi
+  for pair in \
+    git-name:git_name \
+    git-email:git_email \
+    gh-token:gh_token \
+    ts-token:ts_token \
+    ts-host:tailscale_host \
+    op-token:op_token \
+    ssh-key:ssh_key; do
+    field="${pair%%:*}" var="${pair#*:}"
+    value="$(op_item_field "$item_json" "$field")"
+
+    if [[ -n $value && -z ${!var} ]]; then
+      printf -v "$var" '%s' "$value"
+      loaded=1
+    fi
+  done
 
   if (( ! loaded )); then
     echo "Error: 1Password item has no recognized Omaterm setup fields." >&2
