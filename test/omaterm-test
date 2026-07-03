@@ -825,6 +825,21 @@ test_new_ts_token_defaults_hostname() {
   pass "new with ts-token defaults the hostname"
 }
 
+test_new_ts_derived_hostname_truncates_cleanly() {
+  new_env
+  write_docker
+
+  # "testhost-" plus 53 a's is 62 characters, so the 63-character cap lands
+  # exactly on the hyphen before the final x — which must not survive.
+  local stem
+  stem="$(printf 'a%.0s' {1..53})"
+
+  run_omaterm new "$stem-x" --ts-token tskey-x
+
+  assert_file_contains "$TEST_TMP/docker-actions" "-e OMATERM_SETUP_TS_HOST=testhost-$stem " "capped derived hostname does not end with a hyphen"
+  pass "derived hostname truncates cleanly"
+}
+
 test_new_ts_host_overrides_derived_default() {
   new_env
   write_docker
@@ -918,6 +933,7 @@ main() {
   test_new_template_overrides_pass_env_and_clear_setup
   test_new_unknown_template_fails
   test_new_ts_token_defaults_hostname
+  test_new_ts_derived_hostname_truncates_cleanly
   test_new_ts_host_overrides_derived_default
   test_new_ts_host_without_token_fails
   test_new_without_ts_token_does_not_derive_hostname

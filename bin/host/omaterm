@@ -123,7 +123,9 @@ choose_omaterm() {
 host_ts_hostname() {
   local raw="$(hostname)-$1"
   raw="$(printf '%s' "$raw" | tr -c 'a-zA-Z0-9-' '-' | sed -E 's/-+/-/g; s/^-+//; s/-+$//')"
-  printf '%s' "${raw:0:63}"
+  raw="${raw:0:63}"
+  # The cap can land right after a hyphen, and a DNS label can't end with one.
+  printf '%s' "${raw%-}"
 }
 
 run_new() {
