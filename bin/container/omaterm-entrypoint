@@ -26,6 +26,13 @@ start_tailscaled() {
     --state="$TAILSCALE_STATE" \
     --socket="$TAILSCALE_SOCKET" \
     >/var/log/tailscaled.log 2>&1 &
+
+  # Setup asks tailscale for status right away; wait for the daemon's socket
+  # so an unattended bring-up doesn't race it and exit the container.
+  for _ in $(seq 50); do
+    [ -S "$TAILSCALE_SOCKET" ] && break
+    sleep 0.1
+  done
 }
 
 ensure_host_docker_access() {
