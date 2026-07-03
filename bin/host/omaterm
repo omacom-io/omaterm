@@ -128,21 +128,21 @@ host_ts_hostname() {
 
 run_new() {
   local name="" template="" tailscale_host="" mount_docker=0 no_limits=0 detach=0
-  local setup_op="" overrides=0 image reset_cmd run_mode detach_env
+  local setup_op="" image reset_cmd run_mode detach_env
   local git_name="" git_email="" gh_token="" ts_token="" op_token="" ssh_key=""
   local docker_args=() env_args=() name_args=() label_args=() limited=() all=() new_index=0 i
 
   while (($#)); do
     case "$1" in
       -t | --template)      template="${2:-}"; shift 2 ;;
-      --op)                 setup_op="${2:-}"; overrides=1; shift 2 ;;
-      --ts-host)            tailscale_host="${2:-}"; overrides=1; shift 2 ;;
-      --git-name)           git_name="${2:-}"; overrides=1; shift 2 ;;
-      --git-email)          git_email="${2:-}"; overrides=1; shift 2 ;;
-      --gh-token)           gh_token="${2:-}"; overrides=1; shift 2 ;;
-      --ts-token)           ts_token="${2:-}"; overrides=1; shift 2 ;;
-      --op-token)           op_token="${2:-}"; overrides=1; shift 2 ;;
-      --ssh-key)            ssh_key="${2:-}"; overrides=1; shift 2 ;;
+      --op)                 setup_op="${2:-}"; shift 2 ;;
+      --ts-host)            tailscale_host="${2:-}"; shift 2 ;;
+      --git-name)           git_name="${2:-}"; shift 2 ;;
+      --git-email)          git_email="${2:-}"; shift 2 ;;
+      --gh-token)           gh_token="${2:-}"; shift 2 ;;
+      --ts-token)           ts_token="${2:-}"; shift 2 ;;
+      --op-token)           op_token="${2:-}"; shift 2 ;;
+      --ssh-key)            ssh_key="${2:-}"; shift 2 ;;
       -d | --docker-access) mount_docker=1; shift ;;
       -n | --no-limits)     no_limits=1; shift ;;
       --detach)             detach=1; shift ;;
