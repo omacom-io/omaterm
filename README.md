@@ -51,6 +51,8 @@ omaterm new omaterm2 --op "Omaterm Setup"
 
 Omaterm reads fields named `git-name`, `git-email`, `gh-token`, `ts-token`, `ts-host`, `op-token`, and `ssh-key`. Direct command-line values override fields from the 1Password item. Setup values are applied only when the container is first created; an existing `omaterm` container keeps its original environment and home directory state.
 
+Tokens seeded this way live in the container's environment for its lifetime — anyone with Docker access to the host can read them with `docker inspect`, and `omaterm template create` bakes them into the template image. Use scoped, revocable tokens.
+
 ## Managing
 
 Use the installed `omaterm` command to reconnect, create additional named Omaterms, or remove one:
