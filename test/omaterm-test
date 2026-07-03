@@ -508,6 +508,54 @@ test_rm_named() {
   pass "rm named"
 }
 
+test_rm_refuses_unlabeled_container() {
+  new_env
+  write_docker
+  printf 'plain:false:0\n' >"$TEST_CONTAINERS"
+
+  run_omaterm rm plain || true
+
+  assert_file_contains "$TEST_TMP/output" "No such Omaterm: plain" "rm rejects a container omaterm did not create"
+  assert_file_not_contains "$TEST_TMP/docker-actions" "rm -f plain" "rm never removes an unlabeled container"
+  pass "rm refuses unlabeled container"
+}
+
+test_connect_refuses_unlabeled_container() {
+  new_env
+  write_docker
+  printf 'plain:true:0\n' >"$TEST_CONTAINERS"
+
+  run_omaterm connect plain || true
+
+  assert_file_contains "$TEST_TMP/output" "No such Omaterm: plain" "connect rejects a container omaterm did not create"
+  assert_file_not_contains "$TEST_TMP/docker-actions" "attach plain" "connect never attaches to an unlabeled container"
+  pass "connect refuses unlabeled container"
+}
+
+test_exec_refuses_unlabeled_container() {
+  new_env
+  write_docker
+  printf 'plain:true:0\n' >"$TEST_CONTAINERS"
+
+  run_omaterm exec plain pwd || true
+
+  assert_file_contains "$TEST_TMP/output" "No such Omaterm: plain" "exec rejects a container omaterm did not create"
+  assert_file_not_contains "$TEST_TMP/docker-actions" "exec plain" "exec never runs in an unlabeled container"
+  pass "exec refuses unlabeled container"
+}
+
+test_template_create_refuses_unlabeled_source() {
+  new_env
+  write_docker
+  printf 'plain:false:0\n' >"$TEST_CONTAINERS"
+
+  run_omaterm template create ruby --from plain || true
+
+  assert_file_contains "$TEST_TMP/output" "No such Omaterm: plain" "template create rejects an unlabeled source"
+  assert_file_not_contains "$TEST_TMP/docker-actions" "commit plain" "template create never snapshots an unlabeled container"
+  pass "template create refuses unlabeled source"
+}
+
 test_rm_all() {
   new_env
   write_docker
@@ -833,6 +881,10 @@ main() {
   test_exec_uses_long_workdir
   test_rm_default
   test_rm_named
+  test_rm_refuses_unlabeled_container
+  test_connect_refuses_unlabeled_container
+  test_exec_refuses_unlabeled_container
+  test_template_create_refuses_unlabeled_source
   test_rm_all
   test_new_rebalances_existing
   test_rm_rebalances_remaining

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Omaterm templates: capture a configured Omaterm into a reusable image once,
 # then stamp out cheap copy-on-write copies with `omaterm new --template`.
-# Sourced by `omaterm`; relies on its validate_name, container_exists, and usage
+# Sourced by `omaterm`; relies on its validate_name, omaterm_exists, and usage
 # helpers. The spawn side (booting `new --template` from one of these images)
 # lives in omaterm's run_new, which also reads TEMPLATE_IMAGE_REPO.
 TEMPLATE_IMAGE_REPO="omaterm-template"
@@ -22,7 +22,7 @@ template_create() {
   validate_name "$name"
   validate_name "$source"
 
-  container_exists "$source" || {
+  omaterm_exists "$source" || {
     echo "No such Omaterm: $source" >&2
     exit 1
   }

@@ -67,6 +67,12 @@ container_exists() {
   docker container inspect "$1" >/dev/null 2>&1
 }
 
+# True only for containers omaterm created (carrying its label), so commands
+# like `omaterm rm NAME` can never touch unrelated containers.
+omaterm_exists() {
+  omaterm_names | grep -qxF "$1"
+}
+
 container_running() {
   [[ "$(docker inspect -f '{{.State.Running}}' "$1")" == "true" ]]
 }
@@ -300,7 +306,7 @@ run_connect() {
 
   if [[ -n $name ]]; then
     validate_name "$name"
-    container_exists "$name" || {
+    omaterm_exists "$name" || {
       echo "No such Omaterm: $name" >&2
       exit 1
     }
@@ -351,7 +357,7 @@ run_exec() {
   shift
 
   validate_name "$name"
-  container_exists "$name" || {
+  omaterm_exists "$name" || {
     echo "No such Omaterm: $name" >&2
     exit 1
   }
@@ -418,7 +424,7 @@ run_rm() {
     return
   elif [[ -n $name ]]; then
     validate_name "$name"
-    container_exists "$name" || {
+    omaterm_exists "$name" || {
       echo "No such Omaterm: $name" >&2
       exit 1
     }
