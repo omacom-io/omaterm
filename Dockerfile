@@ -5,7 +5,12 @@ COPY arch.packages /tmp/arch.packages
 
 # Update system and install official/Omarchy packages
 RUN printf 'Server = https://mirror.omarchy.org/$repo/os/$arch\n' > /etc/pacman.d/mirrorlist && \
-    printf '\n[omarchy]\nSigLevel = Optional TrustAll\nServer = https://pkgs.omarchy.org/edge/$arch\n' >> /etc/pacman.conf && \
+    pacman -Sy --needed --noconfirm archlinux-keyring && \
+    pacman-key --init && \
+    pacman-key --populate archlinux && \
+    printf '\n[omarchy]\nSigLevel = Never\nServer = https://pkgs.omarchy.org/edge/$arch\n' >> /etc/pacman.conf && \
+    pacman -Sy --needed --noconfirm omarchy-keyring && \
+    sed -i 's/^SigLevel = Never$/SigLevel = Optional TrustAll/' /etc/pacman.conf && \
     pacman -Syu --needed --noconfirm $(grep -vE '^[[:space:]]*(#|$)' /tmp/arch.packages) && \
     pacman -Scc --noconfirm
 
