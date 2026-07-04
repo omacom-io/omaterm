@@ -38,7 +38,7 @@ start_tailscaled() {
 ensure_host_docker_access() {
   [ -S "$HOST_DOCKER_SOCKET" ] || return 0
 
-  local socket_gid
+  local socket_gid socket_group
 
   socket_gid="$(stat -c '%g' "$HOST_DOCKER_SOCKET")"
 
@@ -48,7 +48,8 @@ ensure_host_docker_access() {
   if groupmod -g "$socket_gid" docker 2>/dev/null; then
     usermod -aG docker omaterm
   else
-    usermod -aG "$socket_gid" omaterm || true
+    socket_group="$(getent group "$socket_gid" | cut -d: -f1)"
+    [ -n "$socket_group" ] && usermod -aG "$socket_group" omaterm || true
   fi
 }
 

@@ -29,6 +29,12 @@ grep -qF 'groupmod -g "$socket_gid" docker' "$ENTRYPOINT" ||
 grep -qF 'usermod -aG docker omaterm' "$ENTRYPOINT" ||
   fail "entrypoint should add omaterm to the docker group"
 
+grep -qF 'socket_group="$(getent group "$socket_gid" | cut -d: -f1)"' "$ENTRYPOINT" ||
+  fail "entrypoint should resolve an existing group when the socket gid is already taken"
+
+grep -qF '[ -n "$socket_group" ] && usermod -aG "$socket_group" omaterm || true' "$ENTRYPOINT" ||
+  fail "entrypoint should join the existing socket gid group without aborting"
+
 if grep -qF 'docker-host' "$ENTRYPOINT" || grep -qF 'docker-$socket_gid' "$ENTRYPOINT"; then
   fail "entrypoint should not invent alternate docker group names"
 fi
