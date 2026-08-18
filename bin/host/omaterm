@@ -87,14 +87,22 @@ container_detached() {
 # re-login. If this process doesn't have the GID yet, run the requested omaterm
 # command in a docker-group shell.
 ensure_docker_group() {
-  local docker_gid
+  local docker_gid cmd
 
   docker_gid="$(getent group docker | cut -d: -f3)"
 
   [[ -n $docker_gid ]] || return 0
   id -G | grep -qw "$docker_gid" && return 0
 
-  exec sg docker -c "$(printf '%q ' "$0" "$@")"
+  cmd="$(printf '%q ' "$0" "$@")"
+  if command -v sg >/dev/null 2>&1; then
+    exec sg docker -c "$cmd"
+  else
+    # Some distros (e.g. Arch, where util-linux absorbed newgrp/su/login from
+    # shadow but not sg) no longer ship sg. util-linux's newgrp supports the
+    # same -c flag, so fall back to it.
+    exec newgrp docker -c "$cmd"
+  fi
 }
 
 choose_omaterm() {

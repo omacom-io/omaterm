@@ -126,6 +126,12 @@ echo
 echo "Starting omaterm..."
 if is_wsl; then
   exec omaterm
-else
+elif command -v sg >/dev/null 2>&1; then
+  # sg gives the shell the docker GID immediately, without a re-login.
   exec sg docker -c omaterm
+else
+  # Some distros (e.g. Arch, where util-linux absorbed newgrp/su/login from
+  # shadow but not sg) no longer ship sg. util-linux's newgrp supports the
+  # same -c flag, so fall back to it.
+  exec newgrp docker -c omaterm
 fi

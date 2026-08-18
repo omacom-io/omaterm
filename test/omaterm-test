@@ -167,7 +167,7 @@ SH
   chmod +x "$TEST_BIN/op"
 }
 
-write_fresh_docker_group_membership() {
+write_docker_group_id_getent() {
   cat >"$TEST_BIN/id" <<'SH'
 #!/usr/bin/env bash
 case "${1:-}" in
@@ -196,8 +196,10 @@ else
 fi
 SH
   chmod +x "$TEST_BIN/getent"
+}
 
-cat >"$TEST_BIN/sg" <<'SH'
+write_sg_mock() {
+  cat >"$TEST_BIN/sg" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$TEST_TMP/sg-calls"
 [[ ${1:-} == "docker" && ${2:-} == "-c" ]] || exit 1
@@ -206,8 +208,56 @@ SH
   chmod +x "$TEST_BIN/sg"
 }
 
+write_newgrp_mock() {
+  cat >"$TEST_BIN/newgrp" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TMP/newgrp-calls"
+[[ ${1:-} == "docker" && ${2:-} == "-c" ]] || exit 1
+TEST_IN_SG=1 bash -c "${3:-}"
+SH
+  chmod +x "$TEST_BIN/newgrp"
+}
+
+write_fresh_docker_group_membership() {
+  write_docker_group_id_getent
+  write_sg_mock
+}
+
+# Simulates a distro (e.g. current Arch) where sg is not installed: mocks
+# id/getent as usual and a newgrp fallback, but deliberately leaves no sg
+# reachable anywhere on PATH -- including any real /usr/bin/sg on the host
+# running the tests -- so `command -v sg` genuinely fails.
+write_fresh_docker_group_membership_without_sg() {
+  write_docker_group_id_getent
+  write_newgrp_mock
+
+  local safe="$TEST_TMP/safe_bin" dir f name
+  mkdir -p "$safe"
+  local IFS=:
+  for dir in $PATH; do
+    [[ -d $dir ]] || continue
+    for f in "$dir"/*; do
+      [[ -e $f ]] || continue
+      name="${f##*/}"
+      [[ $name == "sg" ]] && continue
+      [[ -e "$safe/$name" ]] && continue
+      ln -s "$f" "$safe/$name" 2>/dev/null || true
+    done
+  done
+  TEST_SAFE_PATH="$safe"
+}
+
 run_omaterm() {
   PATH="$TEST_BIN:$PATH" OMATERM_IMAGE="omaterm:test" \
+    OMATERM_TOTAL_CORES="${OMATERM_TOTAL_CORES:-20}" \
+    OMATERM_TOTAL_RAM_MB="${OMATERM_TOTAL_RAM_MB:-65536}" \
+    "$SCRIPT" "$@" >"$TEST_TMP/output" 2>&1
+}
+
+# Like run_omaterm, but uses the sg-free PATH from
+# write_fresh_docker_group_membership_without_sg instead of the real $PATH.
+run_omaterm_without_sg() {
+  PATH="$TEST_BIN:$TEST_SAFE_PATH" OMATERM_IMAGE="omaterm:test" \
     OMATERM_TOTAL_CORES="${OMATERM_TOTAL_CORES:-20}" \
     OMATERM_TOTAL_RAM_MB="${OMATERM_TOTAL_RAM_MB:-65536}" \
     "$SCRIPT" "$@" >"$TEST_TMP/output" 2>&1
@@ -244,6 +294,19 @@ test_fresh_docker_group_runs_with_sg() {
   assert_file_contains "$TEST_TMP/sg-calls" "new bokka-bc3 -d" "sg re-exec preserves omaterm arguments"
   assert_file_contains "$TEST_TMP/docker-actions" "run -it --name bokka-bc3" "re-exec runs the requested omaterm command"
   pass "fresh docker group membership runs immediately"
+}
+
+test_fresh_docker_group_falls_back_to_newgrp_without_sg() {
+  new_env
+  write_docker
+  write_fresh_docker_group_membership_without_sg
+
+  run_omaterm_without_sg new bokka-bc3 -d
+
+  assert_file_contains "$TEST_TMP/newgrp-calls" "docker -c" "fresh docker group membership falls back to newgrp when sg is absent"
+  assert_file_contains "$TEST_TMP/newgrp-calls" "new bokka-bc3 -d" "newgrp re-exec preserves omaterm arguments"
+  assert_file_contains "$TEST_TMP/docker-actions" "run -it --name bokka-bc3" "re-exec runs the requested omaterm command"
+  pass "fresh docker group membership falls back to newgrp without sg"
 }
 
 test_default_creates_omaterm() {
@@ -896,6 +959,7 @@ test_new_template_ts_token_defaults_hostname() {
 main() {
   test_help_lists_commands
   test_fresh_docker_group_runs_with_sg
+  test_fresh_docker_group_falls_back_to_newgrp_without_sg
   test_default_creates_omaterm
   test_new_with_setup_seed_args
   test_new_with_op_setup_seed

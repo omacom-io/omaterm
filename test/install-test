@@ -47,9 +47,12 @@ grep -qF 'sudo usermod -aG docker "$target_user"' "$INSTALL" ||
 grep -qF 'exec sg docker -c omaterm' "$INSTALL" ||
   fail "installer should start omaterm from the docker group"
 
-if grep -qF 'newgrp docker' "$INSTALL"; then
-  fail "installer should rely on omaterm group handling instead of newgrp guidance"
+if grep -qE '(echo|printf)[^|]*newgrp docker' "$INSTALL"; then
+  fail "installer should not punt to the user with manual newgrp guidance"
 fi
+
+grep -qF 'exec newgrp docker -c omaterm' "$INSTALL" ||
+  fail "installer should fall back to newgrp when sg is unavailable (e.g. current Arch)"
 
 grep -qF 'Starting omaterm...' "$INSTALL" ||
   fail "installer should start omaterm after install"
